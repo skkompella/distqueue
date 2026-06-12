@@ -1,0 +1,16 @@
+# Binaries
+/bin/
+cmd/broker/broker
+cmd/worker/worker
+
+# WAL / runtime data
+*.wal
+data/
+
+# Benchmark output
+bench/*.csv
+bench/plots/
+
+# Editor
+.idea/
+.vscode/
