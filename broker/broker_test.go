@@ -2,7 +2,9 @@ package broker
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -250,6 +252,54 @@ func TestDLQSurvivesRecovery(t *testing.T) {
 	}
 	if s := b2.Stats(); s.Pending != 0 {
 		t.Fatalf("DLQ task must not be pending: %+v", s)
+	}
+}
+
+// TestConcurrentEnqueueDurability hammers the group-commit path: many
+// goroutines enqueue concurrently (sharing fsyncs), then the broker
+// "crashes". Every enqueue that returned nil must survive recovery.
+func TestConcurrentEnqueueDurability(t *testing.T) {
+	cfg := testConfig(t)
+	b, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const goroutines, perG = 16, 50
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < perG; i++ {
+				task := &Task{
+					ID:       fmt.Sprintf("g%d-t%d", g, i),
+					Payload:  []byte{byte(i)},
+					Priority: i % 7,
+				}
+				if err := b.Enqueue(task); err != nil {
+					t.Errorf("enqueue %s: %v", task.ID, err)
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	b.Close() // crash
+
+	b2 := newTestBroker(t, cfg)
+	if s := b2.Stats(); s.Pending != goroutines*perG {
+		t.Fatalf("expected %d pending after crash, got %+v", goroutines*perG, s)
+	}
+	seen := make(map[string]bool)
+	for i := 0; i < goroutines*perG; i++ {
+		task, err := b2.Dequeue()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seen[task.ID] {
+			t.Fatalf("duplicate task %s", task.ID)
+		}
+		seen[task.ID] = true
 	}
 }
 

@@ -652,7 +652,7 @@ const file_queue_proto_rawDesc = "" +
 	"\x03Ack\x12\x18.distqueue.v1.AckRequest\x1a\x19.distqueue.v1.AckResponse\x12=\n" +
 	"\x04Nack\x12\x19.distqueue.v1.NackRequest\x1a\x1a.distqueue.v1.NackResponse\x12@\n" +
 	"\x05Stats\x12\x1a.distqueue.v1.StatsRequest\x1a\x1b.distqueue.v1.StatsResponse\x12F\n" +
-	"\aListDLQ\x12\x1c.distqueue.v1.ListDLQRequest\x1a\x1d.distqueue.v1.ListDLQResponseB3Z1github.com/srihari-kompella/distqueue/gen/queuepbb\x06proto3"
+	"\aListDLQ\x12\x1c.distqueue.v1.ListDLQRequest\x1a\x1d.distqueue.v1.ListDLQResponseB-Z+github.com/skkompella/distqueue/gen/queuepbb\x06proto3"
 
 var (
 	file_queue_proto_rawDescOnce sync.Once

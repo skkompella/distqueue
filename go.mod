@@ -1,4 +1,4 @@
-module github.com/srihari-kompella/distqueue
+module github.com/skkompella/distqueue
 
 go 1.25.0
 

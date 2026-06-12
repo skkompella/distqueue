@@ -39,13 +39,26 @@ type LogEntry struct {
 	Task   *Task
 }
 
-// WAL is an append-only write-ahead log. Every Append is fsync'd before it
-// returns: once Append succeeds, the mutation survives a crash.
+// WAL is an append-only write-ahead log. A record is durable once
+// WaitSync returns for its sequence number; the Append* convenience
+// methods write and wait in one call.
+//
+// Syncs are group-committed: concurrent appenders write their records
+// under the file lock, then one of them fsyncs on behalf of everyone
+// waiting — so N concurrent writers cost ~1 disk sync, not N. This is
+// what makes throughput scale past the per-fsync floor (see bench/).
 type WAL struct {
-	mu      sync.Mutex
-	path    string
-	file    *os.File
-	entries int // appends since open/compaction, for the compaction trigger
+	mu       sync.Mutex
+	path     string
+	file     *os.File
+	entries  int    // appends since open/compaction, for the compaction trigger
+	writeSeq uint64 // records fully written to the file (guarded by mu)
+
+	syncMu    sync.Mutex
+	syncCond  *sync.Cond
+	syncedSeq uint64 // records known durable (guarded by syncMu)
+	syncing   bool   // a sync leader is currently fsyncing
+	syncErr   error  // a failed fsync poisons the WAL permanently
 }
 
 func OpenWAL(path string) (*WAL, error) {
@@ -53,7 +66,9 @@ func OpenWAL(path string) (*WAL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("wal: open %s: %w", path, err)
 	}
-	return &WAL{path: path, file: f}, nil
+	w := &WAL{path: path, file: f}
+	w.syncCond = sync.NewCond(&w.syncMu)
+	return w, nil
 }
 
 func (w *WAL) Close() error {
@@ -62,32 +77,92 @@ func (w *WAL) Close() error {
 	return w.file.Close()
 }
 
-// AppendTask records a full task (OpEnqueue).
+// AppendTask records a full task (OpEnqueue) and waits for durability.
 func (w *WAL) AppendTask(op byte, t *Task) error {
-	payload, err := encodeTask(t)
+	seq, err := w.AppendTaskNoSync(op, t)
 	if err != nil {
 		return err
 	}
-	return w.append(op, payload)
+	return w.WaitSync(seq)
 }
 
-// AppendID records an ID-only entry (OpAck/OpNack/OpDead).
+// AppendID records an ID-only entry (OpAck/OpNack/OpDead) and waits for
+// durability.
 func (w *WAL) AppendID(op byte, taskID string) error {
-	return w.append(op, []byte(taskID))
+	seq, err := w.AppendIDNoSync(op, taskID)
+	if err != nil {
+		return err
+	}
+	return w.WaitSync(seq)
 }
 
-func (w *WAL) append(op byte, payload []byte) error {
+// AppendTaskNoSync writes the record and returns its sequence number
+// without waiting for fsync. The record is durable only after
+// WaitSync(seq) returns nil. Callers use this to apply state under their
+// own lock and pay for the sync outside it.
+func (w *WAL) AppendTaskNoSync(op byte, t *Task) (uint64, error) {
+	payload, err := encodeTask(t)
+	if err != nil {
+		return 0, err
+	}
+	return w.appendNoSync(op, payload)
+}
+
+// AppendIDNoSync is AppendTaskNoSync for ID-only entries.
+func (w *WAL) AppendIDNoSync(op byte, taskID string) (uint64, error) {
+	return w.appendNoSync(op, []byte(taskID))
+}
+
+func (w *WAL) appendNoSync(op byte, payload []byte) (uint64, error) {
 	rec := encodeRecord(op, payload)
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if _, err := w.file.Write(rec); err != nil {
-		return fmt.Errorf("wal: write: %w", err)
-	}
-	if err := w.file.Sync(); err != nil {
-		return fmt.Errorf("wal: fsync: %w", err)
+		return 0, fmt.Errorf("wal: write: %w", err)
 	}
 	w.entries++
-	return nil
+	w.writeSeq++
+	return w.writeSeq, nil
+}
+
+// WaitSync blocks until record seq is durable. Group commit: the first
+// waiter to find no sync in progress becomes the leader, fsyncs once, and
+// that sync covers every record written before it started — all other
+// waiters just wait for the broadcast. A failed fsync poisons the WAL:
+// the durability of already-written records is unknown, so every current
+// and future call returns the error (recovery happens via restart+replay).
+func (w *WAL) WaitSync(seq uint64) error {
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+	for {
+		if w.syncErr != nil {
+			return w.syncErr
+		}
+		if w.syncedSeq >= seq {
+			return nil
+		}
+		if w.syncing {
+			w.syncCond.Wait()
+			continue
+		}
+		w.syncing = true
+		w.syncMu.Unlock()
+
+		w.mu.Lock()
+		covered := w.writeSeq // everything written so far is on disk after this fsync
+		file := w.file
+		w.mu.Unlock()
+		err := file.Sync()
+
+		w.syncMu.Lock()
+		w.syncing = false
+		if err != nil {
+			w.syncErr = fmt.Errorf("wal: fsync: %w", err)
+		} else if covered > w.syncedSeq {
+			w.syncedSeq = covered
+		}
+		w.syncCond.Broadcast()
+	}
 }
 
 // EntriesSinceOpen reports appends since the WAL was opened or compacted,
@@ -142,8 +217,19 @@ func (w *WAL) Replay() ([]LogEntry, error) {
 
 // Rewrite atomically replaces the log contents with the given entries:
 // write temp file, fsync, rename over the original, fsync the directory.
-// Used for compaction.
+// Used for compaction. The entries must capture the effects of every
+// record written so far (the broker builds them from its applied state),
+// so a successful rewrite makes all outstanding records durable: pending
+// WaitSync waiters are released.
 func (w *WAL) Rewrite(entries []LogEntry) error {
+	// Exclude sync leaders for the duration: an fsync racing the handle
+	// swap below would sync a closed file and falsely poison the WAL.
+	w.syncMu.Lock()
+	defer w.syncMu.Unlock()
+	for w.syncing {
+		w.syncCond.Wait()
+	}
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -193,6 +279,10 @@ func (w *WAL) Rewrite(entries []LogEntry) error {
 	old.Close()
 	w.file = f
 	w.entries = 0
+
+	// The compacted file is durable and embodies every written record.
+	w.syncedSeq = w.writeSeq
+	w.syncCond.Broadcast()
 	return nil
 }
 

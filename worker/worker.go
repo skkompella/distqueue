@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/srihari-kompella/distqueue/gen/queuepb"
+	"github.com/skkompella/distqueue/gen/queuepb"
 )
 
 // Handler processes one task. Returning nil acks the task; returning an

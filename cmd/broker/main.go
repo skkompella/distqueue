@@ -13,8 +13,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/srihari-kompella/distqueue/broker"
-	"github.com/srihari-kompella/distqueue/server"
+	"github.com/skkompella/distqueue/broker"
+	"github.com/skkompella/distqueue/server"
 )
 
 func main() {

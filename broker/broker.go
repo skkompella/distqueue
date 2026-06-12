@@ -135,15 +135,25 @@ func (b *Broker) Enqueue(t *Task) error {
 	t.Status = Pending
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return ErrClosed
 	}
-	if err := b.wal.AppendTask(OpEnqueue, t); err != nil {
+	seq, err := b.wal.AppendTaskNoSync(OpEnqueue, t)
+	if err != nil {
+		b.mu.Unlock()
 		return err
 	}
 	b.pq.Push(t)
-	return b.maybeCompactLocked()
+	cerr := b.maybeCompactLocked()
+	b.mu.Unlock()
+
+	if cerr != nil {
+		return cerr
+	}
+	// Durability wait happens outside the broker lock so concurrent
+	// callers share one group-committed fsync (see WAL.WaitSync).
+	return b.wal.WaitSync(seq)
 }
 
 func (b *Broker) Dequeue() (*Task, error) {
@@ -165,69 +175,93 @@ func (b *Broker) Dequeue() (*Task, error) {
 
 func (b *Broker) Ack(taskID string) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return ErrClosed
 	}
 	t := b.tracker.Remove(taskID)
 	if t == nil {
+		b.mu.Unlock()
 		return ErrUnknownTask
 	}
-	if err := b.wal.AppendID(OpAck, taskID); err != nil {
-		// Durability failed: put it back so the task isn't silently lost.
+	seq, err := b.wal.AppendIDNoSync(OpAck, taskID)
+	if err != nil {
+		// Record never hit the log: put the task back so it isn't lost.
 		b.tracker.Track(t)
+		b.mu.Unlock()
 		return err
 	}
 	t.Status = Done
 	b.acked++
-	return b.maybeCompactLocked()
+	cerr := b.maybeCompactLocked()
+	b.mu.Unlock()
+
+	if cerr != nil {
+		return cerr
+	}
+	return b.wal.WaitSync(seq)
 }
 
 func (b *Broker) Nack(taskID string) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return ErrClosed
 	}
 	t := b.tracker.Remove(taskID)
 	if t == nil {
+		b.mu.Unlock()
 		return ErrUnknownTask
 	}
-	return b.requeueLocked(t)
+	seq, err := b.requeueLocked(t)
+	b.mu.Unlock()
+
+	if err != nil {
+		return err
+	}
+	return b.wal.WaitSync(seq)
 }
 
 // onTimeout is the tracker's expiry callback: an expired in-flight task is
 // treated exactly like a nack.
 func (b *Broker) onTimeout(t *Task) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.closed {
+		b.mu.Unlock()
 		return
 	}
-	_ = b.requeueLocked(t) // WAL errors here have no caller to surface to
+	seq, err := b.requeueLocked(t) // WAL errors here have no caller to surface to
+	b.mu.Unlock()
+
+	if err == nil {
+		_ = b.wal.WaitSync(seq)
+	}
 }
 
 // requeueLocked is the shared nack/timeout path: bump the retry count, then
-// either dead-letter or re-enqueue. Caller holds b.mu.
-func (b *Broker) requeueLocked(t *Task) error {
+// either dead-letter or re-enqueue. Caller holds b.mu and must WaitSync on
+// the returned sequence number after releasing it.
+func (b *Broker) requeueLocked(t *Task) (uint64, error) {
 	t.RetryCount++
 	if t.RetryCount >= b.cfg.MaxRetries {
-		if err := b.wal.AppendID(OpDead, t.ID); err != nil {
+		seq, err := b.wal.AppendIDNoSync(OpDead, t.ID)
+		if err != nil {
 			b.tracker.Track(t)
-			return err
+			return 0, err
 		}
 		t.Status = Dead
 		b.dlq = append(b.dlq, t)
-		return b.maybeCompactLocked()
+		return seq, b.maybeCompactLocked()
 	}
-	if err := b.wal.AppendID(OpNack, t.ID); err != nil {
+	seq, err := b.wal.AppendIDNoSync(OpNack, t.ID)
+	if err != nil {
 		b.tracker.Track(t)
-		return err
+		return 0, err
 	}
 	t.Status = Pending
 	t.Deadline = time.Time{}
 	b.pq.Push(t)
-	return b.maybeCompactLocked()
+	return seq, b.maybeCompactLocked()
 }
 
 type Stats struct {

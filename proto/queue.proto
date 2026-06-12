@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package distqueue.v1;
 
-option go_package = "github.com/srihari-kompella/distqueue/gen/queuepb";
+option go_package = "github.com/skkompella/distqueue/gen/queuepb";
 
 import "google/protobuf/timestamp.proto";
 

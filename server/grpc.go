@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/srihari-kompella/distqueue/broker"
-	"github.com/srihari-kompella/distqueue/gen/queuepb"
+	"github.com/skkompella/distqueue/broker"
+	"github.com/skkompella/distqueue/gen/queuepb"
 )
 
 type TaskQueueServer struct {

@@ -6,6 +6,8 @@ cmd/worker/worker
 # WAL / runtime data
 *.wal
 data/
+demo/
+.benchtmp/
 
 # Benchmark output
 bench/*.csv

@@ -17,8 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/srihari-kompella/distqueue/gen/queuepb"
-	"github.com/srihari-kompella/distqueue/worker"
+	"github.com/skkompella/distqueue/gen/queuepb"
+	"github.com/skkompella/distqueue/worker"
 )
 
 func main() {
