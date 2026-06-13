@@ -336,12 +336,13 @@ func (n *Node) applier() {
 			case <-n.stopCh:
 				return
 			}
+			// Advance per entry (not per batch) so the state machine may
+			// call Snapshot(i) the moment it has consumed index i.
+			n.mu.Lock()
+			if e.Index > n.lastApplied {
+				n.lastApplied = e.Index
+			}
+			n.mu.Unlock()
 		}
-
-		n.mu.Lock()
-		if to > n.lastApplied {
-			n.lastApplied = to
-		}
-		n.mu.Unlock()
 	}
 }
