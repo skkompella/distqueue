@@ -112,9 +112,9 @@ func (kv *kvNode) applyLoop(applyCh chan ApplyMsg) {
 type kvStatus int
 
 const (
-	kvOK kvStatus = iota
-	kvNotApplied      // definitely did not take effect
-	kvMaybeApplied    // accepted by a leader; outcome unknown
+	kvOK           kvStatus = iota
+	kvNotApplied            // definitely did not take effect
+	kvMaybeApplied          // accepted by a leader; outcome unknown
 )
 
 // do proposes cmd and waits for it to apply on this node.

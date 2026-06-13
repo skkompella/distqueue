@@ -1,31 +1,33 @@
 # distqueue
 
-A fault-tolerant distributed task queue in Go: priority scheduling, a
-CRC-checked write-ahead log with crash recovery, group-committed fsyncs,
-at-least-once delivery with retries and a dead-letter queue, a gRPC API,
-and a worker SDK.
+A distributed task queue in Go, built in two phases:
 
-This is **Phase 1** of a two-phase project. Phase 2 replaces the WAL with
-a hand-rolled Raft log and turns the broker into a replicated state
-machine across a 3-node cluster.
+- **Single-node broker**: priority scheduling, a CRC-checked write-ahead
+  log with crash recovery, group-committed fsyncs, at-least-once delivery
+  with retries and a dead-letter queue, a gRPC API, and a worker SDK.
+- **Raft-replicated cluster**: a from-scratch Raft implementation (leader
+  election, log replication, snapshots — no etcd) replaces the WAL; the
+  broker becomes a replicated state machine across 3 nodes. The history
+  is verified linearizable with Porcupine while leaders are killed.
 
 ```
-Client (producer)
-    |
-    v  gRPC
- [Broker]
-    | WAL (disk, fsync + group commit)
-    | In-memory priority queue (min-heap)
-    |
-    +----> Worker A  --ack/nack--> Broker
-    +----> Worker B  --ack/nack--> Broker
-    +----> Worker C  --ack/nack--> Broker
-
-    Unacked tasks ── timeout ──> re-enqueued
-    Failed tasks (N retries) ──> Dead Letter Queue
+Single node                          Cluster
+-----------                          -------
+Client                               Client (failover: follows the leader)
+  |                                    |
+  v  gRPC                              v  gRPC
+[Broker]                       [node1: Leader] <--Raft--> [node2: Follower]
+  | WAL (fsync + group commit)        |     \--Raft--->   [node3: Follower]
+  | In-memory priority queue          |
+  |                              On write: propose -> replicate to
+  +--> Worker A --ack/nack-->         majority -> commit -> apply -> reply
+  +--> Worker B --ack/nack-->
+                                 Leader dies: new leader elected in ~200ms,
+  Unacked -> timeout -> requeue       unacked tasks redelivered, acked
+  N retries -> Dead Letter Queue      tasks never resurface
 ```
 
-## Quickstart
+## Quickstart (single node)
 
 ```bash
 go build -o bin/ ./cmd/...
@@ -46,6 +48,50 @@ go build -o bin/ ./cmd/...
 # 5. Inspect anything that exhausted its retries
 ./bin/produce --broker localhost:9000 --dlq
 ```
+
+## Quickstart (3-node Raft cluster)
+
+```bash
+# Or on one machine without Docker:
+./bin/broker --cluster --node-id node1 --port 9001 --raft-port 8001 --data-dir data/node1 \
+  --peers node2=localhost:8002=localhost:9002,node3=localhost:8003=localhost:9003 &
+./bin/broker --cluster --node-id node2 --port 9002 --raft-port 8002 --data-dir data/node2 \
+  --peers node1=localhost:8001=localhost:9001,node3=localhost:8003=localhost:9003 &
+./bin/broker --cluster --node-id node3 --port 9003 --raft-port 8003 --data-dir data/node3 \
+  --peers node1=localhost:8001=localhost:9001,node2=localhost:8002=localhost:9002 &
+
+# Clients take all addresses and follow the leader automatically:
+./bin/produce --broker localhost:9001,localhost:9002,localhost:9003 --count 100
+./bin/worker  --broker localhost:9001,localhost:9002,localhost:9003 --concurrency 4
+```
+
+With Docker: `docker compose -f deploy/docker-compose.yml up --build`
+brings up the 3 nodes plus Prometheus and a Grafana dashboard
+(http://localhost:3000) showing the live leader, terms, queue depth, and
+ack throughput. (Compose files are provided as-is; written but not yet
+run on this machine — no Docker locally.)
+
+## Leader-kill demo
+
+Actual transcript — 100 tasks in flight, then `kill -9` on the leader:
+
+```
+$ ./bin/produce --broker <cluster> --count 100
+enqueued 100 tasks
+$ ./bin/produce --broker <cluster> --stats     # worker draining
+pending=19 in_flight=2 dlq=0 acked=81
+$ kill -9 <node2 pid>                          # node2 is the leader
+# node3 wins the election ~200ms later; the worker rides through
+$ ./bin/produce --broker <cluster> --stats
+pending=0 in_flight=0 dlq=0 acked=100
+```
+
+All 100 tasks completed; the worker processed 102 deliveries — the 2
+extras are the tasks that were in flight when the leader died, redelivered
+by the new leader. That is the at-least-once contract working across
+failover: **no acknowledged work is ever lost; duplicates are possible;
+handlers must be idempotent.** A node restarted after an outage rejoins
+and catches up in ~2s (snapshot + log replay).
 
 ## Crash recovery demo
 
@@ -99,33 +145,56 @@ writer appends its record, then the first waiter fsyncs once for every
 record written before the sync started. Same approach as PostgreSQL and
 etcd; details in [DESIGN.md](DESIGN.md).
 
+**Replicated (3-node cluster, same machine):**
+
+| Benchmark | Result | Notes |
+|---|---|---|
+| Enqueue commit latency | ~6ms/op | leader persist + majority replication + apply |
+| Sequential throughput | ~165 tasks/sec | one client, one op at a time |
+| Concurrent throughput (8 producers) | ~350 tasks/sec | serialized by whole-log persistence |
+| Leader failover | ~200ms | election timeout 150–300ms |
+| Node rejoin after outage | ~2s | snapshot/log catch-up |
+
+A replicated write costs what it costs: two fsyncs (leader + one
+follower) plus an RPC round trip, serialized by the simple
+whole-state-rewrite persistence the design intentionally starts with.
+[DESIGN.md](DESIGN.md) documents the optimization path (incremental entry
+log + batched group persist — the Phase 1 group-commit trick applied to
+Raft).
+
 ## Semantics
 
-- **At-least-once delivery.** Acknowledged enqueues survive `kill -9`.
-  A task is redelivered if its worker dies, stalls past the task
-  timeout, or the broker crashes while it is in flight. Handlers must
-  be idempotent.
+- **At-least-once delivery.** Acknowledged enqueues survive `kill -9` —
+  of a single broker (WAL) or of the cluster leader (Raft majority). A
+  task is redelivered if its worker dies, stalls past the task timeout,
+  or the node serving it fails. Handlers must be idempotent.
 - **Priority scheduling.** Lower number = higher priority; FIFO within
   a priority level.
 - **Bounded retries.** A task that is nacked or times out `MaxRetries`
-  times moves to the dead-letter queue, inspectable over the API.
+  times moves to the dead-letter queue, inspectable over the API. In
+  cluster mode the retry counter is replicated state, so the DLQ verdict
+  is deterministic on every node.
 - **Torn-write safety.** Every WAL record carries a CRC32; a corrupt
   tail (crash mid-write) is truncated at the last valid record on
-  recovery.
-- **Compaction.** The WAL is periodically rewritten to just live state
-  (atomic temp-file + rename), so it doesn't grow without bound.
+  recovery. Raft state is persisted with atomic temp-file + rename.
+- **Compaction.** The WAL is periodically rewritten to live state; the
+  Raft log is snapshotted and trimmed (lagging followers receive the
+  snapshot via InstallSnapshot).
 
 ## Repository layout
 
 ```
-broker/     core: priority queue, in-flight tracker, WAL, broker state machine
-proto/      gRPC API definition
+broker/     queue core: priority queue, tracker, WAL, replicated state machine
+raft/       Raft from scratch: election, replication, snapshots, persistence
+proto/      gRPC API definitions (client API + raft RPCs)
 gen/        generated protobuf/gRPC code (checked in)
-server/     gRPC server adapter
+server/     gRPC adapters: single-node server, cluster server, metrics
+client/     failover client (follows the leader, rotates on node failure)
 worker/     worker SDK (handler loop, backoff, concurrency)
 cmd/        broker / worker / produce binaries
-tests/      chaos + end-to-end tests
+tests/      full-stack chaos + cluster failover tests
 bench/      benchmarks
+deploy/     Dockerfile, docker-compose (3 nodes + Prometheus + Grafana)
 ```
 
 ## Tests
@@ -134,16 +203,28 @@ bench/      benchmarks
 go test -race ./...
 ```
 
-Unit tests cover heap ordering, WAL roundtrip/replay/corruption, timeout
-redelivery, and retry→DLQ promotion. Chaos tests crash the broker with
-tasks pending and in flight, crash workers mid-execution, and run the
-full gRPC stack with injected handler failures — all under the race
-detector.
+- **Broker unit tests**: heap ordering, WAL roundtrip/replay/corruption,
+  timeout redelivery, retry→DLQ promotion, concurrent-enqueue durability.
+- **Raft suite** (`raft/`): election convergence and stability, minority
+  partitions can't commit, deposed leaders' uncommitted entries are
+  never applied, full-cluster restart, snapshot install and restart —
+  with cross-node State Machine Safety checks.
+- **Linearizability** (`raft/linearizability_test.go`): concurrent
+  clients on a register over the raft package while leaders are killed;
+  history checked with [Porcupine](https://github.com/anishathalye/porcupine),
+  ambiguous timeouts modeled as open-ended operations.
+- **Cluster chaos** (`tests/`): the real gRPC stack under leader kills —
+  no accepted task lost, no acked task redelivered, restarts catch up.
 
-## Roadmap (Phase 2)
+## Observability
 
-- Raft consensus (leader election, log replication, snapshots) — the WAL
-  becomes the replicated log; the broker becomes the state machine
-- 3-node cluster with leader redirects
-- Linearizability checking (Porcupine) under chaos
-- Prometheus metrics + Grafana dashboard, Docker Compose deploy
+Every node exposes Prometheus metrics (`--metrics-port`): Raft term,
+leader flag, log/commit/applied indexes, election count, queue depths,
+ack throughput. `deploy/` ships a Grafana dashboard wired to them.
+
+## Possible next steps
+
+- Pre-Vote (Raft §9.6) to stop rejoining nodes from inflating terms
+- Incremental Raft log persistence with batched group persist
+- Client session dedup for effectively-once enqueues
+- Dynamic membership (joint consensus)
