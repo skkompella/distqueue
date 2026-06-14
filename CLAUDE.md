@@ -14,9 +14,15 @@ Guidance for working in this repo. For the narrative/marketing overview see
 - **Phase 2 (cluster):** a **from-scratch Raft** (election, log
   replication, snapshots — no etcd/raft library) that replaces the WAL and
   turns the broker into a replicated state machine across 3 nodes.
+- **Phase 3 (control plane):** a Python **adaptive control plane** (`ml/`)
+  that scrapes the broker's Prometheus metrics, decides better tuning
+  (timeout / retries / worker count) with EMA + heuristic controllers, and
+  hot-reloads it via `broker.conf` + SIGHUP — no restart. See
+  [§ML control plane](#ml-control-plane).
 
 Module: `github.com/skkompella/distqueue` · `go 1.25` (toolchain 1.26
-installed).
+installed). Control plane: Python 3.11+ **stdlib only** (no numpy/sklearn
+required).
 
 ## Environment / toolchain gotchas (READ FIRST)
 
@@ -111,10 +117,12 @@ Run a 3-node cluster locally (no Docker): see the README "Quickstart
 
 | | |
 |---|---|
-| Production Go (non-test, non-generated) | **~3,600 LOC** |
-| Test Go | **~2,460 LOC** (test:prod ≈ 0.68) |
-| Test + benchmark functions | **47** (broker 20, raft 14, tests 8, bench 5) |
-| Largest packages | `raft/` ~1,290 · `broker/` ~1,150 · `server/` ~550 |
+| Production Go (non-test, non-generated) | **~3,720 LOC** |
+| Test Go | **~2,620 LOC** |
+| Go test + benchmark functions | **54** (broker, raft, tests, bench) |
+| Control plane Python (non-test) | **~750 LOC** |
+| Python tests | **23** (collector, models, config writer, ablation) |
+| Largest Go packages | `raft/` ~1,290 · `broker/` ~1,300 · `server/` ~700 |
 | Raft suite stability | green under `-race -count 8` |
 | Linearizability | Porcupine-verified, ~143 ops/run with leader kills |
 
@@ -135,6 +143,7 @@ Queue (single-node and cluster):
 | `queue_in_flight` | delivered, not yet acked |
 | `queue_dlq_depth` | dead-lettered tasks |
 | `queue_acked_total` | acks since startup (use `rate()` for throughput) |
+| `queue_nacked_total` | nacks + timeout redeliveries since startup; the control plane's main signal (`rate(nacked)/rate(acked)` = "timeout too tight") |
 
 Raft (cluster mode only; absent single-node):
 
@@ -152,6 +161,61 @@ it via the shared `labels`, and add a row to the table above. If it's a
 counter-like quantity, name it `_total` and read it with `rate()` in the
 Grafana dashboard (`deploy/grafana/dashboards/distqueue.json`).
 
+## ML control plane
+
+`ml/` is a Python **adaptive control plane**: a feedback loop that scrapes
+the broker's `/metrics`, recommends tuning, and pushes it back without a
+restart. Honesty framing — these are **EMA + heuristic controllers** with
+an optional scikit-learn SGD upgrade path, not deep ML; don't oversell it.
+
+```
+broker :7000/metrics ──scrape──▶ collector.py ──features──▶ models/
+                                                               │ predict
+broker  ◀──SIGHUP── config_writer.py ◀──BrokerConfig── controller.py
+   └─ reloads broker.conf (ApplyTuning, no restart)
+```
+
+Code map:
+| Path | Role |
+|---|---|
+| `ml/collector.py` | urllib scrape + Prometheus-text parse → `QueueSnapshot` (derives `ack_rate`/`nack_rate` from counter deltas) |
+| `ml/models/` | `timeout_model` (EMA), `worker_model` (formula+EMA), `retry_model` (rules); all subclass `OnlineModel` (pickle persistence in `.model_state/`) |
+| `ml/config_writer.py` | atomic `broker.conf` write (temp→rename) + SIGHUP via pid file; write-if-changed |
+| `ml/controller.py` | the loop: scrape → update → (after warmup) push → persist |
+| `ml/eval/` | `record.py` (live → JSONL), `replay.py` (offline policy-comparison ablation) |
+
+Run (stdlib only, no venv needed):
+```bash
+# broker must expose metrics + accept the config:
+./bin/broker --metrics-port 7000 --config broker.conf --pid-file broker.pid
+python3 ml/controller.py --metrics http://localhost:7000/metrics \
+  --config broker.conf --pid-file broker.pid --interval 2 --min-samples 3
+python3 -m unittest discover -s ml/tests      # 23 tests
+python3 ml/eval/replay.py                      # ablation table
+```
+
+Invariants — do not break these:
+- **Atomic write before signal.** `config_writer` writes a temp file and
+  renames; the broker reads on SIGHUP, so a partial write would feed it
+  malformed TOML. Keep the temp→rename.
+- **A bad config push never crashes the broker.** `loadFileConfig` errors
+  (absent/malformed) → log + keep the running config (`cmd/broker`,
+  `applyFileConfigOrLog`). Only `TaskTimeout` + `MaxRetries` are
+  hot-reloadable (`Broker.ApplyTuning`); `ScanInterval`/`WALPath` are baked
+  in at construction.
+- **Single-node only (v1).** The loop scrapes one `/metrics` and signals
+  one broker. Cluster hot-reload would need config replicated through Raft.
+- **Worker count is advisory (v1).** Written to `broker.conf` and scored by
+  the replay, but the live worker doesn't auto-resize yet.
+- **`ml/` core is stdlib-only.** Don't add numpy/sklearn to the import path
+  of `collector`/`config_writer`/`controller`/the EMA models — they must
+  run on a bare Python (possibly offline). sklearn belongs only behind the
+  optional SGD path.
+
+The ablation (`replay.py`) is a **policy comparison in simulation** (known
+ground-truth execution times), not a measurement of a live run — keep that
+caveat in any reporting.
+
 ## Performance posture (so you don't "fix" a documented trade-off)
 
 Replicated writes are intentionally modest (~165 tasks/sec sequential,
@@ -164,6 +228,8 @@ than ad-hoc patches if asked to speed up the cluster.
 ## Git
 
 Default branch `main` holds Phase 1; Phase 2 lives on `phase-2-raft`
-(pushed, PR pending). Branch off `main` for new work. `gh` is not installed
+(pushed, PR pending); Phase 3 (control plane) lives on `phase-3-ml`,
+**stacked on `phase-2-raft`** because it depends on `server/metrics.go`.
+Branch off the appropriate parent for new work. `gh` is not installed
 locally — open PRs via the GitHub compare URL or install/auth `gh` first.
 End commit messages with the `Co-Authored-By: Claude` trailer.

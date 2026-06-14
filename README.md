@@ -1,6 +1,6 @@
 # distqueue
 
-A distributed task queue in Go, built in two phases:
+A distributed task queue in Go, built in three phases:
 
 - **Single-node broker**: priority scheduling, a CRC-checked write-ahead
   log with crash recovery, group-committed fsyncs, at-least-once delivery
@@ -9,6 +9,9 @@ A distributed task queue in Go, built in two phases:
   election, log replication, snapshots — no etcd) replaces the WAL; the
   broker becomes a replicated state machine across 3 nodes. The history
   is verified linearizable with Porcupine while leaders are killed.
+- **Adaptive control plane**: a Python feedback loop scrapes the broker's
+  metrics and re-tunes it live (timeout / retries / workers) by writing a
+  config the broker hot-reloads on SIGHUP — no restart, no dropped tasks.
 
 ```
 Single node                          Cluster
@@ -118,6 +121,71 @@ working as specified: nothing lost, duplicates possible, so handlers
 must be idempotent. See [DESIGN.md](DESIGN.md) for why dequeues are
 deliberately not logged.
 
+## Adaptive control plane
+
+Static tuning is a guess: pin `task_timeout` too high and genuinely stuck
+tasks sit undetected; pin it too low and you redeliver work that was just
+slow. The control plane (`ml/`) closes the loop instead — it watches the
+broker and adjusts.
+
+```
+broker :7000/metrics ──scrape──▶ collector ──▶ EMA / heuristic models
+                                                      │ recommend
+broker  ◀── SIGHUP ── config writer ◀── timeout / retries / workers
+   └─ hot-reloads broker.conf (no restart, in-flight tasks untouched)
+```
+
+Every interval it scrapes the metrics, derives the failure signal
+(`rate(queue_nacked_total) / rate(queue_acked_total)` — "is the timeout too
+tight?"), and updates three controllers: an **EMA timeout** model (widens
+under nack pressure, tightens when healthy), a **worker-count** estimator,
+and a **retry** rule. When the recommendation changes it writes
+`broker.conf` atomically and sends SIGHUP; the broker reloads in place.
+
+It is honest about what it is: **EMA + heuristic controllers** (pure Python
+standard library — no numpy/scikit-learn needed), with an optional
+online-learning upgrade path. The point is the closed loop, not the model
+sophistication.
+
+```bash
+# Broker with metrics + hot-reload wired up:
+./bin/broker --port 9000 --metrics-port 7000 \
+  --config broker.conf --pid-file broker.pid
+
+# Drive the loop (stdlib only — no venv, no pip):
+python3 ml/controller.py --metrics http://localhost:7000/metrics \
+  --config broker.conf --pid-file broker.pid --interval 2 --min-samples 3
+```
+
+Live transcript — a worker failing 25% of tasks, controller reacting:
+
+```
+[controller] warming up (2/3) pending=0 ack/s=59.9 nack/s=20.97
+[controller] pushed: timeout=33.2s workers=1 retries=2 (nack_pressure=0.390)
+[controller] pushed: timeout=41.9s workers=1 retries=2 (nack_pressure=0.378)
+[controller] pushed: timeout=40.1s workers=1 retries=3 (nack_pressure=0.000)
+# broker.log: SIGHUP: config reloaded   (×10)
+```
+
+Under failure pressure it widened the timeout (33→42s) and trimmed retries
+(3→2, since the failures were structural, not transient); when the queue
+recovered it tightened back and restored the retry budget.
+
+**Ablation** (`python3 ml/eval/replay.py`) — a closed-loop *simulation*
+with known execution times (a policy comparison, not a measurement of a
+live run), over a calm → load-spike → calm workload:
+
+| Policy | Requeue rate | Avg timeout |
+|---|---|---|
+| Fixed-conservative (30s) | 1.1% | 30.0s |
+| Fixed-aggressive (10s) | 17.9% | 10.0s |
+| **Controller (adaptive)** | **2.8%** | **21.9s** |
+
+The controller keeps the conservative policy's low requeue rate while
+cutting average timeout 27% — it detects stuck tasks faster without
+redelivering legitimately-slow ones during the spike, which the naive
+tight timeout does 18% of the time.
+
 ## Benchmarks
 
 `go test -bench . ./bench/` — Linux, 20-core CPU. Two storage targets,
@@ -195,6 +263,7 @@ cmd/        broker / worker / produce binaries
 tests/      full-stack chaos + cluster failover tests
 bench/      benchmarks
 deploy/     Dockerfile, docker-compose (3 nodes + Prometheus + Grafana)
+ml/         adaptive control plane (Python): collector, models, controller, eval
 ```
 
 ## Tests
@@ -215,12 +284,17 @@ go test -race ./...
   ambiguous timeouts modeled as open-ended operations.
 - **Cluster chaos** (`tests/`): the real gRPC stack under leader kills —
   no accepted task lost, no acked task redelivered, restarts catch up.
+- **Control plane** (`ml/tests/`, 23 stdlib `unittest` tests): Prometheus
+  parsing + rate derivation, model behavior (timeout rises under nack
+  pressure and clamps, retries cut when failing), atomic config writes, and
+  the ablation's headline claim. Run: `python3 -m unittest discover -s ml/tests`.
 
 ## Observability
 
 Every node exposes Prometheus metrics (`--metrics-port`): Raft term,
 leader flag, log/commit/applied indexes, election count, queue depths,
-ack throughput. `deploy/` ships a Grafana dashboard wired to them.
+ack/nack throughput. `deploy/` ships a Grafana dashboard wired to them, and
+the control plane consumes the same endpoint.
 
 ## Possible next steps
 
@@ -228,3 +302,6 @@ ack throughput. `deploy/` ships a Grafana dashboard wired to them.
 - Incremental Raft log persistence with batched group persist
 - Client session dedup for effectively-once enqueues
 - Dynamic membership (joint consensus)
+- Control plane: live worker auto-scaling (advisory today), per-task-type
+  timeouts, cluster-mode hot-reload (config via Raft), the optional
+  scikit-learn SGD timeout learner

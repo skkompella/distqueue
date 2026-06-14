@@ -193,3 +193,48 @@ dedup; that buys little when handlers must be idempotent anyway.
   server, failover client — under leader kills and node restarts: no
   acknowledged enqueue lost, no acked task redelivered, restarted nodes
   catch up.
+
+## Adaptive control plane
+
+The broker's tuning knobs (timeout, retries, worker count) are guesses
+baked in at startup. The control plane (`ml/`) makes them a feedback loop:
+observe the broker's own metrics, decide, and push the decision back.
+
+**Why SIGHUP + a config file, not a control RPC.** Reconfiguration is
+rare, low-throughput, and operationally familiar — the nginx/Postgres
+model. A file is greppable, hand-editable in a pinch, and survives a broker
+restart; SIGHUP is a one-line handler. An RPC would mean a new proto
+method, auth, and an always-on surface for something that fires every few
+seconds at most. The file is written atomically (temp → `rename`) so the
+broker, reading on SIGHUP, never sees a half-written TOML, and
+`ApplyTuning` only touches the two genuinely live-reloadable fields under
+the broker lock — `ScanInterval` and `WALPath` are bound to the tracker
+ticker and WAL handle at construction and are deliberately left alone.
+
+**Fail-static, never fail-open.** A malformed or absent config is logged
+and the running config is kept. A bad push from the controller must never
+be able to take the broker down — the worst case is "no change."
+
+**Why the signal is `nack_rate / ack_rate`.** The broker can't report
+per-task execution times without logging every dequeue (which the
+at-least-once design deliberately avoids). But the *rate of redeliveries
+relative to completions* is a faithful proxy for "timeout too tight": when
+it climbs, workers are being interrupted before they finish. That single
+ratio drives all three controllers, which is why Phase 3 first had to add a
+`queue_nacked_total` counter — the broker tracked acks but not nacks.
+
+**EMA, not "ML".** The controllers are exponential moving averages and
+heuristics, chosen for interpretability and zero dependencies (the core
+runs on the Python standard library, important on a possibly-offline box).
+An EMA resists yanking the timeout around on one noisy scrape while still
+adapting over a minute. A scikit-learn online-SGD variant slots in behind
+the same `OnlineModel` interface, but it is an optional upgrade, not load
+bearing — the honest framing is "adaptive control loop," not deep learning.
+
+**What the ablation does and doesn't claim.** `eval/replay.py` is a
+closed-loop *simulation* with known ground-truth execution times — the
+controller reacts to the requeues its own timeout choice produces. It shows
+the *policy* beats both a fixed-conservative and a fixed-aggressive timeout
+(conservative's low requeue rate at ~27% lower average timeout). It is a
+policy comparison, not a measurement of a live cluster; a true live A/B
+would need two clusters under identical load.
