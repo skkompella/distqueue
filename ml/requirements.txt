@@ -1,0 +1,12 @@
+# The control plane core runs on the Python 3.11+ standard library alone
+# (urllib, tomllib, pickle, math, unittest) — nothing here is needed to run
+# controller.py, the collector, or the tests. These are optional extras.
+
+# Optional: nicer test runner (tests also run under `python -m unittest`).
+pytest>=8.0
+
+# Optional: only for the scikit-learn SGD upgrade (models/timeout_model.py
+# SGD path). The default EMA/heuristic controllers do NOT need these, and
+# they may lack prebuilt wheels on very new Python versions.
+# numpy>=1.26
+# scikit-learn>=1.4
