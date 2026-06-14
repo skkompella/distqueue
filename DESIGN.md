@@ -110,9 +110,131 @@ is deliberate: correctness first. The expensive part — the fsync — happens
 *outside* the broker lock via group commit, so the coarse lock guards only
 cheap in-memory operations and a buffered write.
 
-## Phase 2 direction
+---
 
-The Raft log replaces the WAL: each queue mutation becomes a replicated log
-entry, and the broker becomes the state machine that committed entries are
-applied to. The replay fold above *is* that state machine's apply function,
-which is why mutations are already separated from durability here.
+# Phase 2: the Raft-replicated broker
+
+In cluster mode the Raft log replaces the WAL: every queue mutation is a
+replicated log entry, and the broker becomes the state machine committed
+entries are applied to. The replay fold above *is* the apply function.
+
+## Raft implementation choices
+
+Built from the paper (Ongaro & Ousterhout), not ported from etcd:
+
+- **Single mutex per node.** All Raft state behind one lock; RPC sends and
+  applyCh delivery happen outside it. Same philosophy as the broker:
+  correctness first, contention profiled later.
+- **Election restriction (§5.4.1)** in RequestVote and the
+  **current-term-only commit rule (§5.4.2)** in commit advancement — the
+  two safety rules that make leader changes lossless.
+- **Leader no-op on election (§8).** A new leader can't count replicas for
+  old-term entries, so it commits a no-op of its own term immediately;
+  otherwise the commit index stalls until client traffic arrives.
+- **Conflict-term fast backtracking.** Followers reject inconsistent
+  AppendEntries with (ConflictTerm, ConflictIndex), letting the leader
+  skip a whole term per round trip instead of decrementing one entry at a
+  time.
+- **Snapshot sentinel.** `log[0]` always holds the snapshot boundary's
+  (index, term), so index arithmetic is uniform before and after
+  compaction. Followers too far behind get the full snapshot via
+  InstallSnapshot.
+- **Persistence is a whole-state atomic rewrite** (gob → temp file →
+  fsync → rename), synchronous before any RPC reply or self-vote-count.
+  Simple and obviously correct, but it makes log length the dominant cost
+  of every replicated write — so the cluster snapshots aggressively
+  (default: every 1000 applied entries) to keep the log short. The next
+  optimization, deliberately not built yet, is an incremental entry log +
+  batched group persist — the same idea as the Phase 1 WAL group commit,
+  applied to Raft.
+- **Capped reconnect backoff (1s) in the gRPC transport.** Found the hard
+  way: gRPC's default backoff grows to 120s, so a node returning from a
+  long outage stayed unreachable *inbound* (the leader's old channel was
+  still backing off) while its own *outbound* votes worked — it kept
+  deposing the leader with ever-rising terms and never heard the
+  heartbeats that would have calmed it down. A ~1s cap bounds rejoin
+  disruption to a couple of seconds. (Pre-Vote (§9.6) would remove the
+  term inflation entirely; future work.)
+
+## Delivery semantics across failover
+
+Replicated through the log: **enqueue, ack, nack** (and via nack,
+dead-lettering — the retry counter is replicated state, so every node
+reaches the same DLQ verdict deterministically).
+
+Deliberately *not* replicated: **dequeue**. Delivery is a leader-local
+overlay — followers keep delivered-but-unacked tasks as pending. The
+consequences, all consistent with Phase 1's at-least-once contract:
+
+- Leader dies → new leader sees in-flight tasks as pending → redelivers.
+- A node that loses leadership requeues its overlay locally (the
+  leadership watcher), since those deliveries are now someone else's job.
+- A worker's ack can land on a *different* leader than the one that
+  delivered the task: acks validate against replicated state, not the
+  delivery overlay, so completed work counts across failover.
+- Task timeouts are detected by the leader but *recorded* as replicated
+  nacks, keeping retry counts identical on every replica.
+
+Exactly-once would require replicating delivery leases and client session
+dedup; that buys little when handlers must be idempotent anyway.
+
+## What the tests prove
+
+- `raft/` unit suite: elections converge and stay stable; minority
+  partitions can't commit; uncommitted entries from deposed leaders are
+  overwritten and never applied; full-cluster power loss recovers from
+  disk; snapshots trim, install, and survive restarts. State Machine
+  Safety is asserted by index-aligned cross-node comparison.
+- `raft/linearizability_test.go`: a single-register KV over the same raft
+  package, 5 concurrent clients, leader killed repeatedly; the full
+  operation history (including ambiguous timeouts, kept as open-ended
+  operations) is verified linearizable with **Porcupine**.
+- `tests/cluster_test.go`: the real stack — gRPC transport, cluster
+  server, failover client — under leader kills and node restarts: no
+  acknowledged enqueue lost, no acked task redelivered, restarted nodes
+  catch up.
+
+## Adaptive control plane
+
+The broker's tuning knobs (timeout, retries, worker count) are guesses
+baked in at startup. The control plane (`ml/`) makes them a feedback loop:
+observe the broker's own metrics, decide, and push the decision back.
+
+**Why SIGHUP + a config file, not a control RPC.** Reconfiguration is
+rare, low-throughput, and operationally familiar — the nginx/Postgres
+model. A file is greppable, hand-editable in a pinch, and survives a broker
+restart; SIGHUP is a one-line handler. An RPC would mean a new proto
+method, auth, and an always-on surface for something that fires every few
+seconds at most. The file is written atomically (temp → `rename`) so the
+broker, reading on SIGHUP, never sees a half-written TOML, and
+`ApplyTuning` only touches the two genuinely live-reloadable fields under
+the broker lock — `ScanInterval` and `WALPath` are bound to the tracker
+ticker and WAL handle at construction and are deliberately left alone.
+
+**Fail-static, never fail-open.** A malformed or absent config is logged
+and the running config is kept. A bad push from the controller must never
+be able to take the broker down — the worst case is "no change."
+
+**Why the signal is `nack_rate / ack_rate`.** The broker can't report
+per-task execution times without logging every dequeue (which the
+at-least-once design deliberately avoids). But the *rate of redeliveries
+relative to completions* is a faithful proxy for "timeout too tight": when
+it climbs, workers are being interrupted before they finish. That single
+ratio drives all three controllers, which is why Phase 3 first had to add a
+`queue_nacked_total` counter — the broker tracked acks but not nacks.
+
+**EMA, not "ML".** The controllers are exponential moving averages and
+heuristics, chosen for interpretability and zero dependencies (the core
+runs on the Python standard library, important on a possibly-offline box).
+An EMA resists yanking the timeout around on one noisy scrape while still
+adapting over a minute. A scikit-learn online-SGD variant slots in behind
+the same `OnlineModel` interface, but it is an optional upgrade, not load
+bearing — the honest framing is "adaptive control loop," not deep learning.
+
+**What the ablation does and doesn't claim.** `eval/replay.py` is a
+closed-loop *simulation* with known ground-truth execution times — the
+controller reacts to the requeues its own timeout choice produces. It shows
+the *policy* beats both a fixed-conservative and a fixed-aggressive timeout
+(conservative's low requeue rate at ~27% lower average timeout). It is a
+policy comparison, not a measurement of a live cluster; a true live A/B
+would need two clusters under identical load.

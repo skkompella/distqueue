@@ -11,30 +11,26 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
+	"github.com/skkompella/distqueue/client"
 	"github.com/skkompella/distqueue/gen/queuepb"
 	"github.com/skkompella/distqueue/worker"
 )
 
 func main() {
 	var (
-		brokerAddr  = flag.String("broker", "localhost:9000", "broker gRPC address")
+		brokerAddr  = flag.String("broker", "localhost:9000", "broker address(es), comma-separated for a cluster")
 		concurrency = flag.Int("concurrency", 1, "concurrent task handlers")
 		failRate    = flag.Float64("fail-rate", 0, "fraction of tasks the demo handler fails (0..1)")
 		workTime    = flag.Duration("work-time", 50*time.Millisecond, "simulated processing time per task")
 	)
 	flag.Parse()
 
-	conn, err := grpc.NewClient(*brokerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("connect: %v", err)
-	}
-	defer conn.Close()
+	qc := client.New(strings.Split(*brokerAddr, ","))
+	defer qc.Close()
 
 	handler := func(ctx context.Context, task *queuepb.Task) error {
 		time.Sleep(*workTime)
@@ -46,7 +42,7 @@ func main() {
 		return nil
 	}
 
-	w := worker.New(queuepb.NewTaskQueueClient(conn), handler, worker.Config{
+	w := worker.New(qc, handler, worker.Config{
 		Concurrency: *concurrency,
 		Logger:      log.Default(),
 	})

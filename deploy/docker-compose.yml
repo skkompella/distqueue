@@ -1,0 +1,65 @@
+# 3-node distqueue cluster + Prometheus + Grafana.
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+# Clients (host side):
+#   produce --broker localhost:9001,localhost:9002,localhost:9003 --count 100
+#   worker  --broker localhost:9001,localhost:9002,localhost:9003 --concurrency 4
+#
+# Grafana: http://localhost:3000 (anonymous viewer enabled)
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  restart: unless-stopped
+
+services:
+  node1:
+    <<: *node
+    command: >
+      --cluster --node-id node1 --port 9000 --raft-port 8000 --metrics-port 7000
+      --data-dir /data
+      --peers node2=node2:8000=node2:9000,node3=node3:8000=node3:9000
+    ports: ["9001:9000"]
+    volumes: [node1-data:/data]
+
+  node2:
+    <<: *node
+    command: >
+      --cluster --node-id node2 --port 9000 --raft-port 8000 --metrics-port 7000
+      --data-dir /data
+      --peers node1=node1:8000=node1:9000,node3=node3:8000=node3:9000
+    ports: ["9002:9000"]
+    volumes: [node2-data:/data]
+
+  node3:
+    <<: *node
+    command: >
+      --cluster --node-id node3 --port 9000 --raft-port 8000 --metrics-port 7000
+      --data-dir /data
+      --peers node1=node1:8000=node1:9000,node2=node2:8000=node2:9000
+    ports: ["9003:9000"]
+    volumes: [node3-data:/data]
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

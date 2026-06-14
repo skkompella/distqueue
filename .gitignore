@@ -16,3 +16,12 @@ bench/plots/
 # Editor
 .idea/
 .vscode/
+
+# ML control plane (Python)
+ml/.model_state/
+ml/eval/data/
+__pycache__/
+*.pyc
+.venv/
+broker.conf
+broker.pid

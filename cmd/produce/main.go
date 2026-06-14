@@ -8,17 +8,16 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
+	"github.com/skkompella/distqueue/client"
 	"github.com/skkompella/distqueue/gen/queuepb"
 )
 
 func main() {
 	var (
-		brokerAddr = flag.String("broker", "localhost:9000", "broker gRPC address")
+		brokerAddr = flag.String("broker", "localhost:9000", "broker address(es), comma-separated for a cluster")
 		count      = flag.Int("count", 10, "number of tasks to enqueue")
 		priorities = flag.Int("priorities", 3, "spread tasks across this many priority levels")
 		stats      = flag.Bool("stats", false, "print broker stats and exit")
@@ -26,25 +25,21 @@ func main() {
 	)
 	flag.Parse()
 
-	conn, err := grpc.NewClient(*brokerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		log.Fatalf("connect: %v", err)
-	}
-	defer conn.Close()
-	client := queuepb.NewTaskQueueClient(conn)
+	qc := client.New(strings.Split(*brokerAddr, ","))
+	defer qc.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	switch {
 	case *stats:
-		s, err := client.Stats(ctx, &queuepb.StatsRequest{})
+		s, err := qc.Stats(ctx, &queuepb.StatsRequest{})
 		if err != nil {
 			log.Fatalf("stats: %v", err)
 		}
 		fmt.Printf("pending=%d in_flight=%d dlq=%d acked=%d\n",
 			s.GetPending(), s.GetInFlight(), s.GetDlq(), s.GetAcked())
 	case *dlq:
-		resp, err := client.ListDLQ(ctx, &queuepb.ListDLQRequest{})
+		resp, err := qc.ListDLQ(ctx, &queuepb.ListDLQRequest{})
 		if err != nil {
 			log.Fatalf("dlq: %v", err)
 		}
@@ -54,7 +49,7 @@ func main() {
 		fmt.Printf("%d dead-lettered task(s)\n", len(resp.GetTasks()))
 	default:
 		for i := 0; i < *count; i++ {
-			resp, err := client.Enqueue(ctx, &queuepb.EnqueueRequest{Task: &queuepb.Task{
+			resp, err := qc.Enqueue(ctx, &queuepb.EnqueueRequest{Task: &queuepb.Task{
 				Payload:  []byte(fmt.Sprintf("job-%d", i)),
 				Priority: int32(rand.Intn(*priorities)),
 			}})

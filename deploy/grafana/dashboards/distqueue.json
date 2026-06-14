@@ -1,0 +1,74 @@
+{
+  "title": "distqueue cluster",
+  "uid": "distqueue",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Raft leader",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "raft_is_leader == 1", "legendFormat": "{{node}}" }],
+      "options": { "textMode": "name", "colorMode": "background" }
+    },
+    {
+      "id": 2,
+      "title": "Raft term",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 0 },
+      "targets": [{ "expr": "raft_term", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 3,
+      "title": "Elections started",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 0 },
+      "targets": [{ "expr": "raft_elections_started_total", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 4,
+      "title": "Queue depth (pending)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 6 },
+      "targets": [{ "expr": "queue_pending", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 5,
+      "title": "In flight",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 6 },
+      "targets": [{ "expr": "queue_in_flight", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 6,
+      "title": "Ack throughput (tasks/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 6 },
+      "targets": [{ "expr": "rate(queue_acked_total[1m])", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 7,
+      "title": "Commit index",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 13 },
+      "targets": [{ "expr": "raft_commit_index", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 8,
+      "title": "Log entries (post-compaction)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 13 },
+      "targets": [{ "expr": "raft_log_entries", "legendFormat": "{{node}}" }]
+    },
+    {
+      "id": 9,
+      "title": "Dead letter queue",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 13 },
+      "targets": [{ "expr": "queue_dlq_depth", "legendFormat": "{{node}}" }]
+    }
+  ],
+  "schemaVersion": 39
+}
