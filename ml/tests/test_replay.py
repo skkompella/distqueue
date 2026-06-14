@@ -14,7 +14,7 @@ class TestReplayAblation(unittest.TestCase):
         self.r = simulate()
         self.cons = self.r["fixed-conservative (30s)"]
         self.aggr = self.r["fixed-aggressive (10s)"]
-        self.ctrl = self.r["controller (adaptive)"]
+        self.ctrl = self.r["controller (EMA)"]
 
     def test_controller_far_below_aggressive_requeue(self):
         # The whole point: don't requeue legitimate slow tasks like a naive

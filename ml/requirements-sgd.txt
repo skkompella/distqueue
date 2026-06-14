@@ -1,0 +1,13 @@
+# Optional dependencies for the scikit-learn SGD timeout model
+# (models/timeout_sgd.py). The control-plane CORE does not need these — it
+# runs on the standard library alone. Install only to enable
+# `controller.py --timeout-model sgd` or `eval/replay.py --with-sgd`:
+#
+#     python3 -m venv ml/.venv
+#     ml/.venv/bin/pip install -r ml/requirements-sgd.txt
+#
+# Versions are floored at the first releases with CPython 3.14 wheels.
+# Pinning matters: a fitted model is pickled, and scikit-learn does not
+# guarantee unpickling across major versions — retrain after an upgrade.
+numpy>=2.4
+scikit-learn>=1.9

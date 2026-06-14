@@ -20,7 +20,7 @@ import time
 from collector import Collector
 from config_writer import BrokerConfig, ConfigWriter
 from models.retry_model import RetryModel
-from models.timeout_model import TimeoutModel
+from models.timeout_factory import make_timeout_model
 from models.worker_model import WorkerModel
 
 
@@ -34,6 +34,9 @@ def parse_args(argv=None):
                     help="scrapes to observe before pushing any config")
     ap.add_argument("--persist-every", type=int, default=20,
                     help="save model state every N samples")
+    ap.add_argument("--timeout-model", choices=("ema", "sgd"), default="ema",
+                    help="timeout controller: ema (stdlib, default) or sgd "
+                         "(needs scikit-learn; falls back to ema if absent)")
     ap.add_argument("--timeout-min", type=float, default=5.0)
     ap.add_argument("--timeout-max", type=float, default=300.0)
     ap.add_argument("--workers-min", type=int, default=1)
@@ -48,7 +51,7 @@ def main(argv=None):
 
     collector = Collector(args.metrics)
     writer = ConfigWriter(args.config, args.pid_file)
-    t_model = TimeoutModel.load_or_new()
+    t_model = make_timeout_model(args.timeout_model)
     w_model = WorkerModel.load_or_new()
     r_model = RetryModel.load_or_new()
     models = (t_model, w_model, r_model)
@@ -63,7 +66,7 @@ def main(argv=None):
     signal.signal(signal.SIGINT, persist_and_exit)
 
     print(f"[controller] start metrics={args.metrics} interval={args.interval}s "
-          f"warmup={args.min_samples}")
+          f"warmup={args.min_samples} timeout_model={type(t_model).__name__}")
 
     samples = 0
     while True:
