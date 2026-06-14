@@ -28,6 +28,85 @@ func newTestBroker(t *testing.T, cfg Config) *Broker {
 	return b
 }
 
+func TestApplyTuningHotReload(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.TaskTimeout = 30 * time.Second // long enough that the scanner won't fire
+	b := newTestBroker(t, cfg)
+
+	// Tighten the timeout at runtime, then a fresh dequeue must use it.
+	b.ApplyTuning(5*time.Second, 4)
+	if err := b.Enqueue(&Task{ID: "t1", Payload: []byte("x"), Priority: 1}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := b.Dequeue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := time.Until(task.Deadline)
+	if got < 4*time.Second || got > 6*time.Second {
+		t.Fatalf("expected deadline ~5s out after ApplyTuning, got %s", got)
+	}
+
+	// Zero values must leave the corresponding knob unchanged.
+	b.ApplyTuning(0, 0) // no-op
+	b.ApplyTuning(10*time.Second, 0)
+	if err := b.Enqueue(&Task{ID: "t2", Payload: []byte("y"), Priority: 1}); err != nil {
+		t.Fatal(err)
+	}
+	task2, err := b.Dequeue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Until(task2.Deadline); d < 9*time.Second || d > 11*time.Second {
+		t.Fatalf("expected deadline ~10s out, got %s", d)
+	}
+}
+
+func TestNackCounter(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.TaskTimeout = 30 * time.Second // isolate the explicit-nack path from timeouts
+	cfg.MaxRetries = 5
+	b := newTestBroker(t, cfg)
+
+	if err := b.Enqueue(&Task{ID: "n1", Payload: []byte("x"), Priority: 1}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := b.Dequeue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := b.Stats(); s.Nacked != 0 {
+		t.Fatalf("expected 0 nacks before nack, got %d", s.Nacked)
+	}
+	if err := b.Nack(task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if s := b.Stats(); s.Nacked != 1 {
+		t.Fatalf("expected Nacked=1 after explicit nack, got %d", s.Nacked)
+	}
+}
+
+func TestNackCounterCountsTimeouts(t *testing.T) {
+	b := newTestBroker(t, testConfig(t)) // 50ms timeout, 10ms scan
+	if err := b.Enqueue(&Task{ID: "slow", Payload: []byte("x"), Priority: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Dequeue(); err != nil {
+		t.Fatal(err)
+	}
+	// Worker never acks; the timeout scanner redelivers it, counting a nack.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if b.Stats().Nacked >= 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timeout redelivery never incremented the nack counter")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestEnqueueDequeueAck(t *testing.T) {
 	b := newTestBroker(t, testConfig(t))
 

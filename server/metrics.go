@@ -42,6 +42,9 @@ func ServeMetrics(port int, nodeID string, node *raft.Node, stats StatsSource) {
 	gauge("queue_acked_total", "Tasks acknowledged since startup", func() float64 {
 		return float64(stats.Stats().Acked)
 	})
+	gauge("queue_nacked_total", "Nacks + timeout redeliveries since startup", func() float64 {
+		return float64(stats.Stats().Nacked)
+	})
 
 	if node != nil {
 		gauge("raft_term", "Current Raft term", func() float64 {

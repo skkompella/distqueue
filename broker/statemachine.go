@@ -49,6 +49,7 @@ type StateMachine struct {
 	inHeap map[string]bool  // tracks heap membership to avoid duplicates
 	dlq    []*Task
 	acked  int64
+	nacked int64
 }
 
 func NewStateMachine(maxRetries int) *StateMachine {
@@ -90,6 +91,7 @@ func (sm *StateMachine) Apply(op QueueOp) {
 		if !ok {
 			return
 		}
+		sm.nacked++
 		t.RetryCount++
 		if t.RetryCount >= sm.maxRetries {
 			t.Status = Dead
@@ -171,7 +173,7 @@ func (sm *StateMachine) Stats() Stats {
 			pending++
 		}
 	}
-	return Stats{Pending: pending, InFlight: inflight, DLQ: len(sm.dlq), Acked: sm.acked}
+	return Stats{Pending: pending, InFlight: inflight, DLQ: len(sm.dlq), Acked: sm.acked, Nacked: sm.nacked}
 }
 
 func (sm *StateMachine) ListDLQ() []*Task {

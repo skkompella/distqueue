@@ -53,6 +53,7 @@ type Broker struct {
 	wal     *WAL
 	cfg     Config
 	acked   int64 // lifetime acks, for stats
+	nacked  int64 // lifetime nacks + timeout redeliveries, for stats
 	closed  bool
 }
 
@@ -242,6 +243,7 @@ func (b *Broker) onTimeout(t *Task) {
 // either dead-letter or re-enqueue. Caller holds b.mu and must WaitSync on
 // the returned sequence number after releasing it.
 func (b *Broker) requeueLocked(t *Task) (uint64, error) {
+	b.nacked++ // every nack and timeout redelivery counts as a tuning signal
 	t.RetryCount++
 	if t.RetryCount >= b.cfg.MaxRetries {
 		seq, err := b.wal.AppendIDNoSync(OpDead, t.ID)
@@ -264,11 +266,31 @@ func (b *Broker) requeueLocked(t *Task) (uint64, error) {
 	return seq, b.maybeCompactLocked()
 }
 
+// ApplyTuning hot-updates the two runtime-tunable knobs without a restart.
+// It is safe to call concurrently: both fields are only ever read while
+// holding b.mu (TaskTimeout in Dequeue, MaxRetries in requeueLocked).
+//
+// Only these two are reloadable — WALPath and ScanInterval are baked into
+// the WAL handle and the tracker ticker at construction, so they are
+// deliberately left untouched here. taskTimeout <= 0 or maxRetries <= 0
+// leaves the corresponding field unchanged.
+func (b *Broker) ApplyTuning(taskTimeout time.Duration, maxRetries int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if taskTimeout > 0 {
+		b.cfg.TaskTimeout = taskTimeout
+	}
+	if maxRetries > 0 {
+		b.cfg.MaxRetries = maxRetries
+	}
+}
+
 type Stats struct {
 	Pending  int
 	InFlight int
 	DLQ      int
 	Acked    int64
+	Nacked   int64
 }
 
 func (b *Broker) Stats() Stats {
@@ -279,6 +301,7 @@ func (b *Broker) Stats() Stats {
 		InFlight: b.tracker.Len(),
 		DLQ:      len(b.dlq),
 		Acked:    b.acked,
+		Nacked:   b.nacked,
 	}
 }
 

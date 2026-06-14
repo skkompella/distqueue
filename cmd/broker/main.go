@@ -38,6 +38,8 @@ func main() {
 		compactEvery = flag.Int("compact-every", 10000, "compact the WAL every N entries (single-node mode, 0 = never)")
 
 		metricsPort = flag.Int("metrics-port", 0, "Prometheus /metrics port (0 = disabled)")
+		configPath  = flag.String("config", "", "tuning file hot-reloaded on SIGHUP (single-node mode; empty = disabled)")
+		pidFile     = flag.String("pid-file", "", "write this process's PID here at startup (for SIGHUP from the controller)")
 
 		cluster   = flag.Bool("cluster", false, "run as a Raft cluster node")
 		nodeID    = flag.String("node-id", "", "this node's ID (cluster mode)")
@@ -54,10 +56,10 @@ func main() {
 		runCluster(*nodeID, *port, *raftPort, *metricsPort, *dataDir, *peersFlag, *taskTimeout, *maxRetries, *snapEvery)
 		return
 	}
-	runSingle(*port, *metricsPort, *walPath, *taskTimeout, *maxRetries, *compactEvery)
+	runSingle(*port, *metricsPort, *walPath, *taskTimeout, *maxRetries, *compactEvery, *configPath, *pidFile)
 }
 
-func runSingle(port, metricsPort int, walPath string, taskTimeout time.Duration, maxRetries, compactEvery int) {
+func runSingle(port, metricsPort int, walPath string, taskTimeout time.Duration, maxRetries, compactEvery int, configPath, pidFile string) {
 	cfg := broker.DefaultConfig(walPath)
 	cfg.TaskTimeout = taskTimeout
 	cfg.MaxRetries = maxRetries
@@ -74,6 +76,30 @@ func runSingle(port, metricsPort int, walPath string, taskTimeout time.Duration,
 		server.ServeMetrics(metricsPort, "single", nil, b)
 	}
 
+	// Hot-reload support: write the PID so the controller can signal us,
+	// honor an existing config at boot, and reload on every SIGHUP.
+	if pidFile != "" {
+		if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644); err != nil {
+			log.Printf("write pid file: %v", err)
+		} else {
+			defer os.Remove(pidFile)
+		}
+	}
+	if configPath != "" {
+		if _, err := os.Stat(configPath); err == nil {
+			log.Printf("boot: applying tuning from %s (timeout=%s)", configPath, applyFileConfigOrLog(b, configPath))
+		}
+		hup := make(chan os.Signal, 1)
+		signal.Notify(hup, syscall.SIGHUP)
+		go func() {
+			for range hup {
+				if t := applyFileConfigOrLog(b, configPath); t >= 0 {
+					log.Printf("SIGHUP: config reloaded")
+				}
+			}
+		}()
+	}
+
 	grpcServer := grpc.NewServer()
 	server.New(b).Register(grpcServer)
 	serveUntilSignal(grpcServer, port,
@@ -81,6 +107,18 @@ func runSingle(port, metricsPort int, walPath string, taskTimeout time.Duration,
 	if err := b.Close(); err != nil {
 		log.Printf("close broker: %v", err)
 	}
+}
+
+// applyFileConfigOrLog loads and applies the tuning file, logging and
+// returning -1 on any error (a bad config push must never crash or alter
+// the running config). On success it returns the applied timeout.
+func applyFileConfigOrLog(b *broker.Broker, path string) time.Duration {
+	fc, err := loadFileConfig(path)
+	if err != nil {
+		log.Printf("config %q unreadable, keeping current: %v", path, err)
+		return -1
+	}
+	return applyFileConfig(b, fc)
 }
 
 func runCluster(nodeID string, port, raftPort, metricsPort int, dataDir, peersFlag string, taskTimeout time.Duration, maxRetries, snapEvery int) {
