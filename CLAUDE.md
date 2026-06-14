@@ -120,8 +120,8 @@ Run a 3-node cluster locally (no Docker): see the README "Quickstart
 | Production Go (non-test, non-generated) | **~3,720 LOC** |
 | Test Go | **~2,620 LOC** |
 | Go test + benchmark functions | **54** (broker, raft, tests, bench) |
-| Control plane Python (non-test) | **~750 LOC** |
-| Python tests | **23** (collector, models, config writer, ablation) |
+| Control plane Python (non-test) | **~1,010 LOC** |
+| Python tests | **30** (collector, models, config writer, ablation, SGD) |
 | Largest Go packages | `raft/` ~1,290 · `broker/` ~1,300 · `server/` ~700 |
 | Raft suite stability | green under `-race -count 8` |
 | Linearizability | Porcupine-verified, ~143 ops/run with leader kills |
@@ -180,9 +180,11 @@ Code map:
 |---|---|
 | `ml/collector.py` | urllib scrape + Prometheus-text parse → `QueueSnapshot` (derives `ack_rate`/`nack_rate` from counter deltas) |
 | `ml/models/` | `timeout_model` (EMA), `worker_model` (formula+EMA), `retry_model` (rules); all subclass `OnlineModel` (pickle persistence in `.model_state/`) |
+| `ml/models/timeout_sgd.py` | optional scikit-learn `SGDRegressor` timeout model (only imported on the SGD path) |
+| `ml/models/timeout_factory.py` | `make_timeout_model("ema"\|"sgd")` — the seam that keeps sklearn out of the default import path (lazy import + EMA fallback) |
 | `ml/config_writer.py` | atomic `broker.conf` write (temp→rename) + SIGHUP via pid file; write-if-changed |
-| `ml/controller.py` | the loop: scrape → update → (after warmup) push → persist |
-| `ml/eval/` | `record.py` (live → JSONL), `replay.py` (offline policy-comparison ablation) |
+| `ml/controller.py` | the loop: scrape → update → (after warmup) push → persist; `--timeout-model ema\|sgd` |
+| `ml/eval/` | `record.py` (live → JSONL), `replay.py` (offline ablation, `--with-sgd`), `train_sgd.py` (offline SGD training) |
 
 Run (stdlib only, no venv needed):
 ```bash
@@ -190,9 +192,23 @@ Run (stdlib only, no venv needed):
 ./bin/broker --metrics-port 7000 --config broker.conf --pid-file broker.pid
 python3 ml/controller.py --metrics http://localhost:7000/metrics \
   --config broker.conf --pid-file broker.pid --interval 2 --min-samples 3
-python3 -m unittest discover -s ml/tests      # 23 tests
+python3 -m unittest discover -s ml/tests      # 30 tests (SGD ones skip without sklearn)
 python3 ml/eval/replay.py                      # ablation table
 ```
+
+Optional SGD path (needs scikit-learn; **do this in a venv**, never add it
+to the core import path):
+```bash
+python3 -m venv ml/.venv && ml/.venv/bin/pip install -r ml/requirements-sgd.txt
+ml/.venv/bin/python ml/eval/train_sgd.py          # trains → .model_state/timeout_sgd.pkl
+ml/.venv/bin/python ml/eval/replay.py --with-sgd  # adds the SGD ablation row
+ml/.venv/bin/python ml/controller.py --timeout-model sgd ...
+```
+Honest result: SGD ties the conservative policy but does **not** beat EMA —
+at a loose timeout the tighten-signal is absent, so it stays cautious while
+EMA's blind ratchet wins the latency tradeoff. Don't "fix" this by grafting
+EMA's probing onto SGD; the finding is the point. Retrain after any
+sklearn/numpy upgrade (pickled model, no cross-version guarantee).
 
 Invariants — do not break these:
 - **Atomic write before signal.** `config_writer` writes a temp file and

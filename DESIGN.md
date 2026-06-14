@@ -234,7 +234,41 @@ bearing — the honest framing is "adaptive control loop," not deep learning.
 **What the ablation does and doesn't claim.** `eval/replay.py` is a
 closed-loop *simulation* with known ground-truth execution times — the
 controller reacts to the requeues its own timeout choice produces. It shows
-the *policy* beats both a fixed-conservative and a fixed-aggressive timeout
-(conservative's low requeue rate at ~27% lower average timeout). It is a
-policy comparison, not a measurement of a live cluster; a true live A/B
+the EMA *policy* beats both a fixed-conservative and a fixed-aggressive
+timeout (conservative's low requeue rate at ~27% lower average timeout). It
+is a policy comparison, not a measurement of a live cluster; a true live A/B
 would need two clusters under identical load.
+
+## The SGD upgrade — and why the heuristic still wins
+
+The optional `SGDTimeoutModel` is the spec's "real ML" step, done properly
+rather than for show:
+
+- **Trained on labeled data the live system can't see.** In the simulation
+  the true p90 execution time is known, so `eval/train_sgd.py` labels each
+  observed (symptom → ideal-timeout) pair with `p90 · 1.2` and fits an
+  `SGDRegressor`. The live broker has no per-task times — this is exactly
+  why training happens against the simulation.
+- **Honest train/test split.** Training uses a p90 grid and seeds *disjoint*
+  from the held-out evaluation load, so `replay.py --with-sgd` measures
+  generalization (~5s MAE on unseen loads), not memorization.
+- **The feature that makes it learnable.** Raw observable state is
+  under-determined: the same `nack_pressure` can mean a light load under a
+  tight timeout or a heavy load under a loose one — different ideal
+  timeouts. Feeding the *current setpoint* (the timeout in effect, which the
+  controller always knows) as a feature resolves the ambiguity and roughly
+  halved MAE. A small but real modeling insight.
+
+**The result: SGD ties the conservative policy but does not beat EMA.** It
+converges to a correct-but-cautious timeout because at a loose setpoint
+almost nothing requeues — the signal that would justify tightening is
+absent, so a model that only acts on evidence won't tighten. EMA's blind
+ratchet (nudge down whenever it's quiet) is not justified by any
+observation, yet that very inductive bias is what wins the latency/requeue
+tradeoff. The lesson, kept in the repo precisely because it's the honest
+one: a supervised model is bounded by the information in its features, and a
+one-line heuristic can encode a useful prior the data cannot supply.
+
+The SGD path is also strictly optional — lazy-imported behind a factory
+with EMA fallback — so the control-plane core keeps its zero-dependency,
+runs-anywhere property.

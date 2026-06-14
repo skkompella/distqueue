@@ -144,8 +144,8 @@ and a **retry** rule. When the recommendation changes it writes
 
 It is honest about what it is: **EMA + heuristic controllers** (pure Python
 standard library — no numpy/scikit-learn needed), with an optional
-online-learning upgrade path. The point is the closed loop, not the model
-sophistication.
+scikit-learn SGD upgrade (below). The point is the closed loop, not the
+model sophistication.
 
 ```bash
 # Broker with metrics + hot-reload wired up:
@@ -179,12 +179,32 @@ live run), over a calm → load-spike → calm workload:
 |---|---|---|
 | Fixed-conservative (30s) | 1.1% | 30.0s |
 | Fixed-aggressive (10s) | 17.9% | 10.0s |
-| **Controller (adaptive)** | **2.8%** | **21.9s** |
+| **Controller (EMA)** | **2.8%** | **21.9s** |
+| Controller (SGD) | 2.4% | 31.0s |
 
-The controller keeps the conservative policy's low requeue rate while
+The EMA controller keeps the conservative policy's low requeue rate while
 cutting average timeout 27% — it detects stuck tasks faster without
 redelivering legitimately-slow ones during the spike, which the naive
 tight timeout does 18% of the time.
+
+### Optional: scikit-learn SGD controller
+
+`controller.py --timeout-model sgd` swaps the EMA rule for an
+`SGDRegressor` trained offline (`ml/eval/train_sgd.py`) on simulation data
+where the true p90 execution time is the label, then evaluated on
+**held-out** load (unseen p90s and seed; ~5s MAE). It's gated behind
+`ml/requirements-sgd.txt` and falls back to EMA if scikit-learn is absent —
+the stdlib core is never burdened with the dependency.
+
+The honest result (last row above): **SGD matches the conservative policy's
+safety but does *not* beat the EMA heuristic.** It converges to a correct-
+but-cautious timeout because at a loose setpoint almost nothing requeues —
+the very signal that would tell it to tighten is absent, so it won't.
+EMA's blind ratchet (tighten a little whenever it's quiet — a heuristic
+justified by no observation) is exactly what wins the latency tradeoff
+here. A clean illustration that a learned model is only as good as the
+information in its features, and that a simple inductive bias can beat
+supervised learning when the data can't supply that bias. Reported as-is.
 
 ## Benchmarks
 
