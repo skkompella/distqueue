@@ -30,6 +30,63 @@ Client                               Client (failover: follows the leader)
   N retries -> Dead Letter Queue      tasks never resurface
 ```
 
+## Results
+
+Measured on a 13th-gen Intel i7 (20 threads), Linux / ext4 on NVMe. Every
+figure regenerates from `bash bench/run.sh && python3 bench/plot.py` — the
+chart generator is hand-written SVG, standard library only, no plotting
+dependencies.
+
+### Throughput
+
+![Single-node throughput](docs/img/throughput.svg)
+
+Durability is real — every mutation is fsync'd *before* its ack — so a lone
+producer is disk-bound (~1.6k tasks/sec). The WAL then **group-commits**:
+concurrent producers share a single fsync, so throughput climbs with load.
+
+![Group-commit scaling](docs/img/group_commit.svg)
+
+1 → 128 producers: **1.6k → 48k tasks/sec on the same disk**, because N
+writers cost roughly one sync (the trick PostgreSQL and etcd use). Dequeue
+is pure in-memory at ~740k/sec.
+
+| Path | ext4 (NVMe) | tmpfs (CPU ceiling) |
+|---|---|---|
+| Enqueue, 1 producer | 1.6k/s | 219k/s |
+| Enqueue, concurrent | 50k/s | 80k/s |
+| Dequeue | 740k/s | 743k/s |
+| End-to-end (enqueue+dequeue+ack) | 856/s | 92k/s |
+
+Replicated across a **3-node Raft cluster**: 672/s sequential, 873/s
+concurrent; leader failover in ~200ms, node rejoin in ~2s. The consensus
+tier is intentionally modest (whole-log persistence per write) — see
+[DESIGN.md](DESIGN.md).
+
+### Latency
+
+![Round-trip latency](docs/img/latency.svg)
+
+Enqueue→dequeue→ack round trip: **P50 1.10ms / P99 1.68ms** on ext4 (two
+fsyncs per cycle), ~5–18µs on tmpfs (the CPU floor).
+
+### Adaptive tuning
+
+![Control-plane ablation](docs/img/ablation.svg)
+
+| Policy | Requeue rate | Avg timeout |
+|---|---|---|
+| Fixed-conservative (30s) | 1.1% | 30.0s |
+| Fixed-aggressive (10s) | 17.9% | 10.0s |
+| **Controller (EMA)** | **2.8%** | **21.9s** |
+| Controller (SGD) | 2.4% | 31.0s |
+
+The EMA control loop keeps the safe policy's low requeue rate while cutting
+average timeout **27%** — faster stuck-task detection without redelivering
+slow-but-fine tasks the way a naive tight timeout does (18% of the time).
+The optional scikit-learn SGD model *ties* the heuristic rather than beating
+it — an honest result, explained in [Adaptive control plane](#adaptive-control-plane).
+
 ## Quickstart (single node)
 
 ```bash
@@ -171,21 +228,13 @@ Under failure pressure it widened the timeout (33→42s) and trimmed retries
 (3→2, since the failures were structural, not transient); when the queue
 recovered it tightened back and restored the retry budget.
 
-**Ablation** (`python3 ml/eval/replay.py`) — a closed-loop *simulation*
-with known execution times (a policy comparison, not a measurement of a
-live run), over a calm → load-spike → calm workload:
-
-| Policy | Requeue rate | Avg timeout |
-|---|---|---|
-| Fixed-conservative (30s) | 1.1% | 30.0s |
-| Fixed-aggressive (10s) | 17.9% | 10.0s |
-| **Controller (EMA)** | **2.8%** | **21.9s** |
-| Controller (SGD) | 2.4% | 31.0s |
-
-The EMA controller keeps the conservative policy's low requeue rate while
-cutting average timeout 27% — it detects stuck tasks faster without
-redelivering legitimately-slow ones during the spike, which the naive
-tight timeout does 18% of the time.
+**Ablation** (`python3 ml/eval/replay.py`) — the chart and table are in
+[Results](#adaptive-tuning). It's a closed-loop *simulation* with known
+execution times (a policy comparison, not a measurement of a live run),
+over a calm → load-spike → calm workload. The EMA controller keeps the
+conservative policy's low requeue rate while cutting average timeout 27% —
+it detects stuck tasks faster without redelivering legitimately-slow ones
+during the spike, which the naive tight timeout does 18% of the time.
 
 ### Optional: scikit-learn SGD controller
 
@@ -196,8 +245,9 @@ where the true p90 execution time is the label, then evaluated on
 `ml/requirements-sgd.txt` and falls back to EMA if scikit-learn is absent —
 the stdlib core is never burdened with the dependency.
 
-The honest result (last row above): **SGD matches the conservative policy's
-safety but does *not* beat the EMA heuristic.** It converges to a correct-
+The honest result (the SGD row in the ablation): **SGD matches the
+conservative policy's safety but does *not* beat the EMA heuristic.** It
+converges to a correct-
 but-cautious timeout because at a loose setpoint almost nothing requeues —
 the very signal that would tell it to tighten is absent, so it won't.
 EMA's blind ratchet (tighten a little whenever it's quiet — a heuristic
@@ -208,47 +258,31 @@ supervised learning when the data can't supply that bias. Reported as-is.
 
 ## Benchmarks
 
-`go test -bench . ./bench/` — Linux, 20-core CPU. Two storage targets,
-because fsync cost dominates and honesty matters:
+Numbers and charts are in [Results](#results) above. Methodology, so the
+figures are reproducible and honest:
 
-**ext4 on NVMe** (real fsync, ~0.6ms each):
+- **Two storage targets.** fsync cost dominates, so every throughput/latency
+  figure is run on **ext4 (NVMe)** — the real cost — and on **tmpfs**, where
+  fsync is ~free, to expose the CPU-side ceiling. Benchmarks on `/tmp`
+  (tmpfs) alone would report inflated durability numbers.
+- **The group-commit curve** (`TestEnqueueScaling`) sweeps producer
+  concurrency on ext4: a writer appends its record, then the first waiter
+  fsyncs once for every record written before that sync started — so N
+  concurrent writers cost ≈ one sync. Same approach as PostgreSQL and etcd;
+  mechanism in [DESIGN.md](DESIGN.md).
+- **Replicated** numbers come from a local 3-node cluster
+  (`bench/cluster_throughput.sh`). A replicated write costs two fsyncs
+  (leader + a follower) plus an RPC round trip, serialized by the simple
+  whole-log-rewrite persistence the design starts with;
+  [DESIGN.md](DESIGN.md) covers the optimization path (incremental log +
+  batched group persist — the Phase 1 trick applied to Raft).
 
-| Benchmark | Throughput | Notes |
-|---|---|---|
-| Enqueue, 1 producer | 1.7k tasks/sec | fsync-bound: 1 sync per op |
-| Enqueue, 160 producers | **61k tasks/sec** | group commit: many ops share 1 sync |
-| Dequeue | 711k tasks/sec | pure in-memory |
-| Enqueue→Dequeue→Ack round trip | P50 1.09ms / P99 1.58ms | 2 fsyncs per cycle |
+Run it yourself:
 
-**tmpfs** (fsync ~free; shows the CPU-side ceiling):
-
-| Benchmark | Throughput |
-|---|---|
-| Enqueue, 1 producer | 214k tasks/sec |
-| Dequeue | 700k tasks/sec |
-| Enqueue→Dequeue→Ack round trip | P50 8.7µs / P99 28.5µs |
-
-The 35× gap between 1 and 160 producers on ext4 is **group commit**: a
-writer appends its record, then the first waiter fsyncs once for every
-record written before the sync started. Same approach as PostgreSQL and
-etcd; details in [DESIGN.md](DESIGN.md).
-
-**Replicated (3-node cluster, same machine):**
-
-| Benchmark | Result | Notes |
-|---|---|---|
-| Enqueue commit latency | ~6ms/op | leader persist + majority replication + apply |
-| Sequential throughput | ~165 tasks/sec | one client, one op at a time |
-| Concurrent throughput (8 producers) | ~350 tasks/sec | serialized by whole-log persistence |
-| Leader failover | ~200ms | election timeout 150–300ms |
-| Node rejoin after outage | ~2s | snapshot/log catch-up |
-
-A replicated write costs what it costs: two fsyncs (leader + one
-follower) plus an RPC round trip, serialized by the simple
-whole-state-rewrite persistence the design intentionally starts with.
-[DESIGN.md](DESIGN.md) documents the optimization path (incremental entry
-log + batched group persist — the Phase 1 group-commit trick applied to
-Raft).
+```bash
+go test -bench . ./bench/                       # raw Go benchmarks
+bash bench/run.sh && python3 bench/plot.py      # measure everything + redraw the charts
+```
 
 ## Semantics
 
