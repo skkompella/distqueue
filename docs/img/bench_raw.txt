@@ -1,0 +1,65 @@
+=== SECTION ext4_bench ===
+goos: linux
+goarch: amd64
+pkg: github.com/skkompella/distqueue/bench
+cpu: 13th Gen Intel(R) Core(TM) i7-13700H
+BenchmarkEnqueue-20            	    4291	    607872 ns/op	      1645 tasks/sec
+BenchmarkEnqueueParallel-20    	  162628	     20089 ns/op	     49778 tasks/sec
+BenchmarkDequeue-20            	 1905613	      1352 ns/op	    739528 tasks/sec
+BenchmarkEndToEnd-20           	    2244	   1167972 ns/op	       856.2 tasks/sec	      1168 µs/task
+PASS
+ok  	github.com/skkompella/distqueue/bench	76.648s
+=== SECTION tmpfs_bench ===
+goos: linux
+goarch: amd64
+pkg: github.com/skkompella/distqueue/bench
+cpu: 13th Gen Intel(R) Core(TM) i7-13700H
+BenchmarkEnqueue-20            	  463248	      4569 ns/op	    218883 tasks/sec
+BenchmarkEnqueueParallel-20    	  192865	     12577 ns/op	     79509 tasks/sec
+BenchmarkDequeue-20            	 2005378	      1346 ns/op	    742831 tasks/sec
+BenchmarkEndToEnd-20           	  276472	     10862 ns/op	     92064 tasks/sec	        10.86 µs/task
+PASS
+ok  	github.com/skkompella/distqueue/bench	44.366s
+=== SECTION scaling ===
+scaling producers=1 tasks_per_sec=1642
+scaling producers=2 tasks_per_sec=2468
+scaling producers=4 tasks_per_sec=3920
+scaling producers=8 tasks_per_sec=6771
+scaling producers=16 tasks_per_sec=12005
+scaling producers=32 tasks_per_sec=22027
+scaling producers=64 tasks_per_sec=42613
+scaling producers=128 tasks_per_sec=47572
+=== SECTION latency_ext4 ===
+round-trip latency over 5000 samples: P50=1.097269ms P95=1.42623ms P99=1.682643ms
+=== SECTION latency_tmpfs ===
+round-trip latency over 5000 samples: P50=5.448µs P95=10.642µs P99=18.086µs
+=== SECTION ablation ===
+
+Ablation — timeout tuning policies (125 ticks, 200 tasks/tick)
+
+policy                        requeue rate   avg timeout
+--------------------------------------------------------
+fixed-conservative (30s)              1.1%        30.0s
+fixed-aggressive (10s)               17.9%        10.0s
+controller (EMA)                      2.8%        21.9s
+
+controller (EMA) vs fixed-conservative: -27.2% avg timeout at 2.8% requeue (vs 1.1%)
+
+=== SECTION ablation_sgd ===
+
+Ablation — timeout tuning policies (125 ticks, 200 tasks/tick)
+
+policy                        requeue rate   avg timeout
+--------------------------------------------------------
+fixed-conservative (30s)              1.1%        30.0s
+fixed-aggressive (10s)               17.9%        10.0s
+controller (EMA)                      2.8%        21.9s
+controller (SGD)                      2.4%        31.0s
+
+controller (EMA) vs fixed-conservative: -27.2% avg timeout at 2.8% requeue (vs 1.1%)
+
+controller (SGD) vs fixed-conservative: +3.3% avg timeout at 2.4% requeue (vs 1.1%)
+
+=== SECTION cluster ===
+cluster seq_tasks_per_sec=672
+cluster conc_tasks_per_sec=873

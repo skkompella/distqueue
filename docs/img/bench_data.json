@@ -1,0 +1,84 @@
+{
+  "throughput": {
+    "ext4": {
+      "BenchmarkEnqueue": 1645.0,
+      "BenchmarkEnqueueParallel": 49778.0,
+      "BenchmarkDequeue": 739528.0,
+      "BenchmarkEndToEnd": 856.2
+    },
+    "tmpfs": {
+      "BenchmarkEnqueue": 218883.0,
+      "BenchmarkEnqueueParallel": 79509.0,
+      "BenchmarkDequeue": 742831.0,
+      "BenchmarkEndToEnd": 92064.0
+    }
+  },
+  "scaling": [
+    [
+      1,
+      1642.0
+    ],
+    [
+      2,
+      2468.0
+    ],
+    [
+      4,
+      3920.0
+    ],
+    [
+      8,
+      6771.0
+    ],
+    [
+      16,
+      12005.0
+    ],
+    [
+      32,
+      22027.0
+    ],
+    [
+      64,
+      42613.0
+    ],
+    [
+      128,
+      47572.0
+    ]
+  ],
+  "latency": {
+    "ext4": {
+      "p50": 1097.269,
+      "p95": 1426.23,
+      "p99": 1682.643
+    },
+    "tmpfs": {
+      "p50": 5.448,
+      "p95": 10.642,
+      "p99": 18.086
+    }
+  },
+  "ablation": {
+    "fixed-conservative (30s)": {
+      "requeue": 1.1,
+      "timeout": 30.0
+    },
+    "fixed-aggressive (10s)": {
+      "requeue": 17.9,
+      "timeout": 10.0
+    },
+    "controller (EMA)": {
+      "requeue": 2.8,
+      "timeout": 21.9
+    },
+    "controller (SGD)": {
+      "requeue": 2.4,
+      "timeout": 31.0
+    }
+  },
+  "cluster": {
+    "seq": 672.0,
+    "conc": 873.0
+  }
+}

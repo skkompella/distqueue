@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="380" viewBox="0 0 760 380" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="760" height="380" fill="white"/>
+<text x="70.0" y="30.0" font-size="18" fill="#1f2933" text-anchor="start" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">Control plane: requeue rate vs average timeout</text>
+<text x="70.0" y="48.0" font-size="12" fill="#7b8794" text-anchor="start" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">lower-left is better — cut timeout latency without requeuing legitimately-slow tasks</text>
+<line x1="70.0" y1="316.0" x2="736.0" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="320.0" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">0%</text>
+<line x1="70.0" y1="264.8" x2="736.0" y2="264.8" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="268.8" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">4%</text>
+<line x1="70.0" y1="213.6" x2="736.0" y2="213.6" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="217.6" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">8%</text>
+<line x1="70.0" y1="162.4" x2="736.0" y2="162.4" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="166.4" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">12%</text>
+<line x1="70.0" y1="111.2" x2="736.0" y2="111.2" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="115.2" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">16%</text>
+<line x1="70.0" y1="60.0" x2="736.0" y2="60.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="64.0" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">20%</text>
+<line x1="70.0" y1="60.0" x2="70.0" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="70.0" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">0s</text>
+<line x1="165.1" y1="60.0" x2="165.1" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="165.1" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">5s</text>
+<line x1="260.3" y1="60.0" x2="260.3" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="260.3" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">10s</text>
+<line x1="355.4" y1="60.0" x2="355.4" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="355.4" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">15s</text>
+<line x1="450.6" y1="60.0" x2="450.6" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="450.6" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">20s</text>
+<line x1="545.7" y1="60.0" x2="545.7" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="545.7" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">25s</text>
+<line x1="640.9" y1="60.0" x2="640.9" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="640.9" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">30s</text>
+<line x1="736.0" y1="60.0" x2="736.0" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="736.0" y="334.0" font-size="11" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">35s</text>
+<text x="403.0" y="368.0" font-size="12" fill="#7b8794" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">average timeout (s) — lower = faster stuck-task detection</text>
+<text x="22.0" y="188.0" font-size="12" fill="#7b8794" text-anchor="middle" font-weight="normal" transform="rotate(-90 22.0 188.0)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">requeue rate</text>
+<line x1="181.6" y1="265.8" x2="155.6" y2="287.8" stroke="#16a34a" stroke-width="2"/>
+<polygon points="155.6,287.8 166.6,284.8 159.6,276.8" fill="#16a34a" opacity="1.0"/>
+<text x="185.6" y="263.8" font-size="12" fill="#16a34a" text-anchor="start" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">better</text>
+<circle cx="640.9" cy="301.9" r="8" fill="#d97706"/>
+<circle cx="260.3" cy="86.9" r="8" fill="#dc2626"/>
+<circle cx="486.7" cy="280.2" r="8" fill="#16a34a"/>
+<circle cx="659.9" cy="285.3" r="8" fill="#64748b"/>
+<text x="317.4" y="64.8" font-size="11" fill="#7b8794" text-anchor="start" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">policy</text>
+<text x="485.4" y="64.8" font-size="11" fill="#7b8794" text-anchor="end" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">requeue</text>
+<text x="547.4" y="64.8" font-size="11" fill="#7b8794" text-anchor="end" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">timeout</text>
+<circle cx="323.4" cy="68.8" r="6" fill="#d97706"/>
+<text x="335.4" y="72.8" font-size="12" fill="#1f2933" text-anchor="start" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">fixed-conservative</text>
+<text x="485.4" y="72.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1.1%</text>
+<text x="547.4" y="72.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">30s</text>
+<circle cx="323.4" cy="88.8" r="6" fill="#dc2626"/>
+<text x="335.4" y="92.8" font-size="12" fill="#1f2933" text-anchor="start" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">fixed-aggressive</text>
+<text x="485.4" y="92.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">17.9%</text>
+<text x="547.4" y="92.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">10s</text>
+<circle cx="323.4" cy="108.8" r="6" fill="#16a34a"/>
+<text x="335.4" y="112.8" font-size="12" fill="#1f2933" text-anchor="start" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">controller (EMA)</text>
+<text x="485.4" y="112.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">2.8%</text>
+<text x="547.4" y="112.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">22s</text>
+<circle cx="323.4" cy="128.8" r="6" fill="#64748b"/>
+<text x="335.4" y="132.8" font-size="12" fill="#1f2933" text-anchor="start" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">controller (SGD)</text>
+<text x="485.4" y="132.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">2.4%</text>
+<text x="547.4" y="132.8" font-size="12" fill="#1f2933" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">31s</text>
+</svg>

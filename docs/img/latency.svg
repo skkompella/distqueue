@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="380" viewBox="0 0 760 380" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="760" height="380" fill="white"/>
+<text x="70.0" y="30.0" font-size="18" fill="#1f2933" text-anchor="start" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">Round-trip latency (enqueue + dequeue + ack)</text>
+<text x="70.0" y="48.0" font-size="12" fill="#7b8794" text-anchor="start" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">log scale — ext4 pays ~2 fsyncs per cycle; tmpfs is the CPU floor</text>
+<line x1="70.0" y1="316.0" x2="736.0" y2="316.0" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="320.0" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1µs</text>
+<line x1="70.0" y1="241.4" x2="736.0" y2="241.4" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="245.4" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">10µs</text>
+<line x1="70.0" y1="166.7" x2="736.0" y2="166.7" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="170.7" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">100µs</text>
+<line x1="70.0" y1="92.1" x2="736.0" y2="92.1" stroke="#e4e7eb" stroke-width="1"/>
+<text x="62.0" y="96.1" font-size="11" fill="#7b8794" text-anchor="end" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1ms</text>
+<rect x="116.8" y="89.1" width="62.2" height="226.9" rx="2" fill="#2563eb" opacity="1.0"/>
+<text x="147.9" y="83.1" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1.10ms</text>
+<rect x="183.0" y="261.1" width="62.2" height="54.9" rx="2" fill="#06b6d4" opacity="1.0"/>
+<text x="214.1" y="255.1" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">5.4µs</text>
+<text x="181.0" y="334.0" font-size="12" fill="#1f2933" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">P50</text>
+<rect x="338.8" y="80.6" width="62.2" height="235.4" rx="2" fill="#2563eb" opacity="1.0"/>
+<text x="369.9" y="74.6" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1.43ms</text>
+<rect x="405.0" y="239.4" width="62.2" height="76.6" rx="2" fill="#06b6d4" opacity="1.0"/>
+<text x="436.1" y="233.4" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">10.6µs</text>
+<text x="403.0" y="334.0" font-size="12" fill="#1f2933" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">P95</text>
+<rect x="560.8" y="75.2" width="62.2" height="240.8" rx="2" fill="#2563eb" opacity="1.0"/>
+<text x="591.9" y="69.2" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">1.68ms</text>
+<rect x="627.0" y="222.2" width="62.2" height="93.8" rx="2" fill="#06b6d4" opacity="1.0"/>
+<text x="658.1" y="216.2" font-size="10" fill="#1f2933" text-anchor="middle" font-weight="600" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">18.1µs</text>
+<text x="625.0" y="334.0" font-size="12" fill="#1f2933" text-anchor="middle" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">P99</text>
+<rect x="586.0" y="36.0" width="11.0" height="11.0" rx="2" fill="#2563eb" opacity="1.0"/>
+<text x="602.0" y="46.0" font-size="11" fill="#1f2933" text-anchor="start" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">ext4 (NVMe)</text>
+<rect x="666.0" y="36.0" width="11.0" height="11.0" rx="2" fill="#06b6d4" opacity="1.0"/>
+<text x="682.0" y="46.0" font-size="11" fill="#1f2933" text-anchor="start" font-weight="normal" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">tmpfs</text>
+</svg>

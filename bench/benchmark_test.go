@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -111,6 +112,48 @@ func BenchmarkEndToEnd(b *testing.B) {
 	}
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "tasks/sec")
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000, "µs/task")
+}
+
+// TestEnqueueScaling sweeps producer concurrency and prints throughput at
+// each level, so the group-commit story is a real curve, not two points:
+// N goroutines hammer Enqueue for a fixed window and we report tasks/sec.
+// Single-threaded is fsync-bound; concurrency lets group commit batch many
+// records per sync. Run: go test -run TestEnqueueScaling -v ./bench/
+func TestEnqueueScaling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("scaling sweep skipped in -short")
+	}
+	cfg := broker.DefaultConfig(filepath.Join(t.TempDir(), "scale.wal"))
+	cfg.CompactEvery = 0
+	br, err := broker.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer br.Close()
+
+	payload := make([]byte, 256)
+	const window = 1500 * time.Millisecond
+	for _, producers := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
+		var ops atomic.Int64
+		var wg sync.WaitGroup
+		deadline := time.Now().Add(window)
+		for p := 0; p < producers; p++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for time.Now().Before(deadline) {
+					if err := br.Enqueue(&broker.Task{Payload: payload, Priority: 1}); err != nil {
+						t.Error(err)
+						return
+					}
+					ops.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		rate := float64(ops.Load()) / window.Seconds()
+		fmt.Printf("scaling producers=%d tasks_per_sec=%.0f\n", producers, rate)
+	}
 }
 
 // TestLatencyDistribution is a -run-only helper (not a Benchmark) that
