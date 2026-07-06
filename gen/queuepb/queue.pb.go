@@ -463,13 +463,17 @@ func (*StatsRequest) Descriptor() ([]byte, []int) {
 }
 
 type StatsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Pending       int64                  `protobuf:"varint,1,opt,name=pending,proto3" json:"pending,omitempty"`
-	InFlight      int64                  `protobuf:"varint,2,opt,name=in_flight,json=inFlight,proto3" json:"in_flight,omitempty"`
-	Dlq           int64                  `protobuf:"varint,3,opt,name=dlq,proto3" json:"dlq,omitempty"`
-	Acked         int64                  `protobuf:"varint,4,opt,name=acked,proto3" json:"acked,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Pending  int64                  `protobuf:"varint,1,opt,name=pending,proto3" json:"pending,omitempty"`
+	InFlight int64                  `protobuf:"varint,2,opt,name=in_flight,json=inFlight,proto3" json:"in_flight,omitempty"`
+	Dlq      int64                  `protobuf:"varint,3,opt,name=dlq,proto3" json:"dlq,omitempty"`
+	Acked    int64                  `protobuf:"varint,4,opt,name=acked,proto3" json:"acked,omitempty"`
+	// Target worker concurrency recommended by the adaptive control plane
+	// (pushed via broker.conf + SIGHUP). 0 = no advice; workers keep their
+	// current pool size. Single-node mode only for now.
+	AdvisedWorkerCount int32 `protobuf:"varint,5,opt,name=advised_worker_count,json=advisedWorkerCount,proto3" json:"advised_worker_count,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *StatsResponse) Reset() {
@@ -526,6 +530,13 @@ func (x *StatsResponse) GetDlq() int64 {
 func (x *StatsResponse) GetAcked() int64 {
 	if x != nil {
 		return x.Acked
+	}
+	return 0
+}
+
+func (x *StatsResponse) GetAdvisedWorkerCount() int32 {
+	if x != nil {
+		return x.AdvisedWorkerCount
 	}
 	return 0
 }
@@ -637,12 +648,13 @@ const file_queue_proto_rawDesc = "" +
 	"\vNackRequest\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\x0e\n" +
 	"\fNackResponse\"\x0e\n" +
-	"\fStatsRequest\"n\n" +
+	"\fStatsRequest\"\xa0\x01\n" +
 	"\rStatsResponse\x12\x18\n" +
 	"\apending\x18\x01 \x01(\x03R\apending\x12\x1b\n" +
 	"\tin_flight\x18\x02 \x01(\x03R\binFlight\x12\x10\n" +
 	"\x03dlq\x18\x03 \x01(\x03R\x03dlq\x12\x14\n" +
-	"\x05acked\x18\x04 \x01(\x03R\x05acked\"\x10\n" +
+	"\x05acked\x18\x04 \x01(\x03R\x05acked\x120\n" +
+	"\x14advised_worker_count\x18\x05 \x01(\x05R\x12advisedWorkerCount\"\x10\n" +
 	"\x0eListDLQRequest\";\n" +
 	"\x0fListDLQResponse\x12(\n" +
 	"\x05tasks\x18\x01 \x03(\v2\x12.distqueue.v1.TaskR\x05tasks2\xa0\x03\n" +

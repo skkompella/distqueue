@@ -22,7 +22,7 @@ from typing import Dict, Optional
 @dataclass
 class BrokerConfig:
     task_timeout_seconds: float = 30.0
-    worker_count: int = 4  # advisory in v1 (broker ignores; worker may consume)
+    worker_count: int = 4  # relayed by the broker via Stats; workers auto-resize
     max_retries: int = 3
     timeouts: Dict[str, float] = field(default_factory=dict)  # per-type (future)
 

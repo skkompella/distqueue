@@ -54,7 +54,11 @@ type Broker struct {
 	cfg     Config
 	acked   int64 // lifetime acks, for stats
 	nacked  int64 // lifetime nacks + timeout redeliveries, for stats
-	closed  bool
+	// advisedWorkers is the control plane's recommended worker concurrency,
+	// served to workers via Stats. 0 = no advice. The broker itself never
+	// acts on it; it is a relay from broker.conf to polling workers.
+	advisedWorkers int
+	closed         bool
 }
 
 func New(cfg Config) (*Broker, error) {
@@ -285,23 +289,36 @@ func (b *Broker) ApplyTuning(taskTimeout time.Duration, maxRetries int) {
 	}
 }
 
+// SetAdvisedWorkers records the control plane's recommended worker
+// concurrency (from broker.conf on SIGHUP). n <= 0 clears the advice.
+func (b *Broker) SetAdvisedWorkers(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if n < 0 {
+		n = 0
+	}
+	b.advisedWorkers = n
+}
+
 type Stats struct {
-	Pending  int
-	InFlight int
-	DLQ      int
-	Acked    int64
-	Nacked   int64
+	Pending        int
+	InFlight       int
+	DLQ            int
+	Acked          int64
+	Nacked         int64
+	AdvisedWorkers int // 0 = no advice
 }
 
 func (b *Broker) Stats() Stats {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return Stats{
-		Pending:  b.pq.Len(),
-		InFlight: b.tracker.Len(),
-		DLQ:      len(b.dlq),
-		Acked:    b.acked,
-		Nacked:   b.nacked,
+		Pending:        b.pq.Len(),
+		InFlight:       b.tracker.Len(),
+		DLQ:            len(b.dlq),
+		Acked:          b.acked,
+		Nacked:         b.nacked,
+		AdvisedWorkers: b.advisedWorkers,
 	}
 }
 

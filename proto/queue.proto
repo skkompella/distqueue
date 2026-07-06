@@ -56,6 +56,10 @@ message StatsResponse {
   int64 in_flight = 2;
   int64 dlq       = 3;
   int64 acked     = 4;
+  // Target worker concurrency recommended by the adaptive control plane
+  // (pushed via broker.conf + SIGHUP). 0 = no advice; workers keep their
+  // current pool size. Single-node mode only for now.
+  int32 advised_worker_count = 5;
 }
 
 message ListDLQRequest {}

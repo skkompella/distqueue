@@ -65,10 +65,11 @@ func (s *TaskQueueServer) Nack(_ context.Context, req *queuepb.NackRequest) (*qu
 func (s *TaskQueueServer) Stats(_ context.Context, _ *queuepb.StatsRequest) (*queuepb.StatsResponse, error) {
 	st := s.broker.Stats()
 	return &queuepb.StatsResponse{
-		Pending:  int64(st.Pending),
-		InFlight: int64(st.InFlight),
-		Dlq:      int64(st.DLQ),
-		Acked:    st.Acked,
+		Pending:            int64(st.Pending),
+		InFlight:           int64(st.InFlight),
+		Dlq:                int64(st.DLQ),
+		Acked:              st.Acked,
+		AdvisedWorkerCount: int32(st.AdvisedWorkers),
 	}, nil
 }
 

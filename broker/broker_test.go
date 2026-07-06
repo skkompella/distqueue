@@ -62,6 +62,21 @@ func TestApplyTuningHotReload(t *testing.T) {
 	}
 }
 
+func TestAdvisedWorkers(t *testing.T) {
+	b := newTestBroker(t, testConfig(t))
+	if got := b.Stats().AdvisedWorkers; got != 0 {
+		t.Fatalf("expected no advice initially, got %d", got)
+	}
+	b.SetAdvisedWorkers(8)
+	if got := b.Stats().AdvisedWorkers; got != 8 {
+		t.Fatalf("expected 8, got %d", got)
+	}
+	b.SetAdvisedWorkers(-3) // negative clears
+	if got := b.Stats().AdvisedWorkers; got != 0 {
+		t.Fatalf("expected negative to clear advice, got %d", got)
+	}
+}
+
 func TestNackCounter(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.TaskTimeout = 30 * time.Second // isolate the explicit-nack path from timeouts

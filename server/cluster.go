@@ -268,6 +268,8 @@ func (s *ClusterServer) finish(opType byte, taskID string) error {
 
 func (s *ClusterServer) Stats(_ context.Context, _ *queuepb.StatsRequest) (*queuepb.StatsResponse, error) {
 	st := s.sm.Stats()
+	// AdvisedWorkerCount stays 0: the control plane is single-node v1, so
+	// cluster nodes never emit scaling advice (0 = "no advice" to workers).
 	return &queuepb.StatsResponse{
 		Pending:  int64(st.Pending),
 		InFlight: int64(st.InFlight),

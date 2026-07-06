@@ -15,7 +15,7 @@ import (
 //	[tuning]
 //	task_timeout_seconds = 12.5
 //	max_retries = 3
-//	worker_count = 6          # advisory: consumed by the worker, ignored here
+//	worker_count = 6          # served to workers via Stats; broker doesn't act on it
 type FileConfig struct {
 	Tuning struct {
 		TaskTimeoutSeconds float64 `toml:"task_timeout_seconds"`
@@ -41,5 +41,8 @@ func applyFileConfig(b *broker.Broker, fc FileConfig) (timeout time.Duration) {
 		timeout = time.Duration(fc.Tuning.TaskTimeoutSeconds * float64(time.Second))
 	}
 	b.ApplyTuning(timeout, fc.Tuning.MaxRetries)
+	if fc.Tuning.WorkerCount > 0 {
+		b.SetAdvisedWorkers(fc.Tuning.WorkerCount)
+	}
 	return timeout
 }

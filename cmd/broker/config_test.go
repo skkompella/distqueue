@@ -61,7 +61,7 @@ func TestApplyFileConfigPartial(t *testing.T) {
 	defer b.Close()
 
 	var fc FileConfig
-	fc.Tuning.TaskTimeoutSeconds = 8 // max_retries left zero → unchanged
+	fc.Tuning.TaskTimeoutSeconds = 8 // max_retries + worker_count left zero → unchanged
 	timeout := applyFileConfig(b, fc)
 	if timeout != 8*time.Second {
 		t.Fatalf("expected 8s timeout, got %s", timeout)

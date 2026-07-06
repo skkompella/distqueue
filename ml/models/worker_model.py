@@ -6,9 +6,9 @@ divided by the worker count in effect. We don't know the true per-worker
 rate, so we learn an effective service rate via EMA and size the pool to
 clear `pending` in `target_drain_seconds`.
 
-v1 note: this recommendation is advisory — the worker process doesn't yet
-auto-resize. The value is still written to broker.conf and scored offline
-by eval/replay.py.
+The recommendation is actuated end to end: the controller writes it to
+broker.conf, the broker relays it via Stats (advised_worker_count), and the
+worker SDK polls that and live-resizes its goroutine pool.
 """
 
 from __future__ import annotations
