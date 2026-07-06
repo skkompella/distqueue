@@ -59,8 +59,9 @@ installed — open PRs via compare URLs. A prepared Phase-2 PR body exists at
   cap caused rejoin term-storms.
 - **`ml/` core is stdlib-only**; sklearn lives only behind
   `timeout_factory` + `ml/.venv` (`requirements-sgd.txt`).
-- Control plane is **single-node v1**; worker count advisory; per-type
-  timeouts deferred.
+- Control plane is **single-node v1**; worker count is **actuated**
+  (broker relays it via `Stats.advised_worker_count`; worker SDK polls and
+  live-resizes, graceful scale-down); per-type timeouts deferred.
 
 ## Environment gotchas (bite every fresh shell)
 
@@ -76,7 +77,6 @@ installed — open PRs via compare URLs. A prepared Phase-2 PR body exists at
 
 ## Open items / natural next steps
 
-- Open the stacked PRs (compare URLs; or install/auth `gh`).
 - Pre-Vote (§9.6), incremental Raft log persistence + batched group
-  persist, client session dedup, live worker auto-scaling, cluster-mode
-  hot-reload (config via Raft), run the Docker stack once Docker exists.
+  persist, client session dedup, cluster-mode hot-reload (config via
+  Raft), run the Docker stack once Docker exists.

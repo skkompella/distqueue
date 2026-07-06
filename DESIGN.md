@@ -272,3 +272,29 @@ one-line heuristic can encode a useful prior the data cannot supply.
 The SGD path is also strictly optional — lazy-imported behind a factory
 with EMA fallback — so the control-plane core keeps its zero-dependency,
 runs-anywhere property.
+
+## The worker-count actuator
+
+`worker_count` started life advisory; closing the loop needed a last hop
+from the broker to a process the controller can't signal. Three choices
+were on the table, and **advice-over-Stats** won:
+
+- **Poll, not push.** The broker relays the recommendation in its existing
+  Stats RPC (`advised_worker_count`); workers poll every few seconds. No
+  new RPC surface, no broker→worker connection tracking, and it works
+  through the failover client for any number of workers on any host —
+  unlike a `worker.conf` + SIGHUP scheme, which assumes a shared filesystem
+  and pid management.
+- **`0` means "no advice."** Cluster nodes advertise 0 until config is
+  replicated through Raft, so a worker pointed at a cluster simply keeps
+  its configured size — no false signal, no special-casing.
+- **Scale-down never kills in-flight work.** Each pool goroutine has a
+  private stop channel checked only *between* iterations; a retiring worker
+  finishes its current task first (the handler keeps the parent context).
+  The stop channel also wakes idle workers out of their backoff sleep, so
+  shrinking doesn't wait on a timer.
+- The broker stays policy-free: it stores and serves the number, nothing
+  else. The controller owns *what* to recommend; the worker owns *how* to
+  resize. Live behavior: 2→7 under a produce flood, then a staircase back
+  to 1 as the backlog drained (10 resizes, 57 config reloads, zero dropped
+  tasks).

@@ -199,6 +199,23 @@ under nack pressure, tightens when healthy), a **worker-count** estimator,
 and a **retry** rule. When the recommendation changes it writes
 `broker.conf` atomically and sends SIGHUP; the broker reloads in place.
 
+The worker count is **actuated, not just advised**: the broker relays the
+recommendation via its Stats RPC (`advised_worker_count`), and the worker
+SDK polls it and live-resizes its goroutine pool — scale-down is graceful
+(a retiring goroutine finishes its in-flight task first). Actual transcript,
+a slow-handler worker starting at 2 while a producer floods the queue, then
+the load stopping:
+
+```
+worker: scaling workers 1 -> 5 (advised 5)     # backlog building
+worker: scaling workers 5 -> 6 (advised 6)
+worker: scaling workers 6 -> 7 (advised 7)     # load stops here
+worker: scaling workers 7 -> 6 (advised 6)     # backlog draining
+worker: scaling workers 6 -> 5 (advised 5)
+   ...                                         # staircase down
+worker: scaling workers 2 -> 1 (advised 1)     # idle
+```
+
 It is honest about what it is: **EMA + heuristic controllers** (pure Python
 standard library — no numpy/scikit-learn needed), with an optional
 scikit-learn SGD upgrade (below). The point is the closed loop, not the
@@ -356,6 +373,5 @@ the control plane consumes the same endpoint.
 - Incremental Raft log persistence with batched group persist
 - Client session dedup for effectively-once enqueues
 - Dynamic membership (joint consensus)
-- Control plane: live worker auto-scaling (advisory today), per-task-type
-  timeouts, cluster-mode hot-reload (config via Raft), the optional
-  scikit-learn SGD timeout learner
+- Control plane: per-task-type timeouts, cluster-mode hot-reload (config
+  via Raft), scaling advice from cluster nodes

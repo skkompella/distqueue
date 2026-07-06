@@ -221,8 +221,13 @@ Invariants — do not break these:
   in at construction.
 - **Single-node only (v1).** The loop scrapes one `/metrics` and signals
   one broker. Cluster hot-reload would need config replicated through Raft.
-- **Worker count is advisory (v1).** Written to `broker.conf` and scored by
-  the replay, but the live worker doesn't auto-resize yet.
+- **Worker count is actuated via Stats advice.** The broker relays
+  `worker_count` from `broker.conf` through `Stats.advised_worker_count`
+  (`Broker.SetAdvisedWorkers`); the worker SDK polls it (`Config.AutoScale`,
+  default on in `cmd/worker`) and live-resizes its pool. Scale-down must
+  stay graceful: the per-goroutine stop signal is only checked between
+  tasks — never cancel an in-flight handler. Cluster nodes advertise 0
+  (no advice) until config is replicated through Raft.
 - **`ml/` core is stdlib-only.** Don't add numpy/sklearn to the import path
   of `collector`/`config_writer`/`controller`/the EMA models — they must
   run on a bare Python (possibly offline). sklearn belongs only behind the
